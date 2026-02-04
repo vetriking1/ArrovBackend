@@ -20,12 +20,12 @@ router.post("/", async (req, res) => {
     console.log(`[${requestId}] IRN: ${irn}`);
     console.log(`[${requestId}] Cancel Reason Code: ${cancel_reason_code}`);
     console.log(
-      `[${requestId}] Cancel Reason: ${cancel_reason || "Not provided"}`
+      `[${requestId}] Cancel Reason: ${cancel_reason || "Not provided"}`,
     );
 
     if (!invoice_no || !irn || !cancel_reason_code || !cancel_reason) {
       console.log(
-        `[${requestId}] Validation Failed: invoice_no, irn, cancel_reason_code, and cancel_reason are required`
+        `[${requestId}] Validation Failed: invoice_no, irn, cancel_reason_code, and cancel_reason are required`,
       );
       return res.status(400).json({
         status: 0,
@@ -50,7 +50,7 @@ router.post("/", async (req, res) => {
     }
 
     console.log(
-      `[${requestId}] Fetching unit details for unit_id: ${invoice.unit_id}...`
+      `[${requestId}] Fetching unit details for unit_id: ${invoice.unit_id}...`,
     );
     const { data: unit } = await supabase
       .from("units")
@@ -60,7 +60,7 @@ router.post("/", async (req, res) => {
 
     if (!unit) {
       console.log(
-        `[${requestId}] Unit not found for unit_id: ${invoice.unit_id}`
+        `[${requestId}] Unit not found for unit_id: ${invoice.unit_id}`,
       );
       return res.status(404).json({
         status: 0,
@@ -78,7 +78,7 @@ router.post("/", async (req, res) => {
           clientId: process.env.EINVOICE_CLIENT_ID,
           clientSecret: process.env.EINVOICE_CLIENT_SECRET,
         },
-      }
+      },
     );
 
     const data = await response.json();
@@ -87,7 +87,7 @@ router.post("/", async (req, res) => {
       JSON.stringify({
         status: data.status,
         hasAccessToken: !!data.data?.accessToken,
-      })
+      }),
     );
 
     if (data.status === 1) {
@@ -107,7 +107,7 @@ router.post("/", async (req, res) => {
             Password: process.env.EINVOICE_PASSWORD,
             ForceRefreshAccessToken: false,
           }),
-        }
+        },
       );
 
       const authData = await authResponse.json();
@@ -116,12 +116,12 @@ router.post("/", async (req, res) => {
         JSON.stringify({
           Status: authData.Status,
           hasAuthToken: !!authData.Data?.AuthToken,
-        })
+        }),
       );
 
       if (authData.Status === 1) {
         console.log(
-          `[${requestId}] Step 3: Cancelling IRN ${irn} for invoice ${invoice_no}...`
+          `[${requestId}] Step 3: Cancelling IRN ${irn} for invoice ${invoice_no}...`,
         );
         const cancelResponse = await fetch(
           "https://staging.fynamics.co.in/api/einvoice/enhanced/cancel-irn",
@@ -141,7 +141,7 @@ router.post("/", async (req, res) => {
               CnlRsn: cancel_reason_code,
               CnlRem: cancel_reason || "",
             }),
-          }
+          },
         );
 
         const cancelData = await cancelResponse.json();
@@ -151,12 +151,12 @@ router.post("/", async (req, res) => {
             hasIrn: cancelData.Irn !== null,
             Irn: cancelData.Irn,
             CancelDate: cancelData.CancelDate,
-          })
+          }),
         );
 
         if (cancelData.Irn !== null) {
           console.log(
-            `[${requestId}] Step 4: Recording cancellation in database...`
+            `[${requestId}] Step 4: Recording cancellation in database...`,
           );
           const { error: cancelError } = await supabase
             .from("canceled_invoices")
@@ -170,7 +170,7 @@ router.post("/", async (req, res) => {
           if (cancelError) {
             console.error(
               `[${requestId}] Error inserting into canceled_invoices:`,
-              cancelError
+              cancelError,
             );
             return res.status(500).json({
               status: 0,
@@ -181,7 +181,7 @@ router.post("/", async (req, res) => {
           console.log(`[${requestId}] Cancellation recorded successfully`);
 
           console.log(
-            `[${requestId}] Step 5: Updating invoice ${invoice_no} status to cancelled...`
+            `[${requestId}] Step 5: Updating invoice ${invoice_no} status to cancelled...`,
           );
           const { error: updateError } = await supabase
             .from("invoices")
@@ -191,7 +191,7 @@ router.post("/", async (req, res) => {
           if (updateError) {
             console.error(
               `[${requestId}] Error updating invoice is_cancelled:`,
-              updateError
+              updateError,
             );
             return res.status(500).json({
               status: 0,
@@ -200,12 +200,12 @@ router.post("/", async (req, res) => {
             });
           }
           console.log(
-            `[${requestId}] Invoice ${invoice_no} marked as cancelled successfully`
+            `[${requestId}] Invoice ${invoice_no} marked as cancelled successfully`,
           );
 
           const duration = Date.now() - startTime;
           console.log(
-            `[${requestId}] Cancel IRN Request Completed Successfully in ${duration}ms`
+            `[${requestId}] Cancel IRN Request Completed Successfully in ${duration}ms`,
           );
           return res.json(cancelData);
         }

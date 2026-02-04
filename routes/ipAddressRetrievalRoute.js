@@ -9,19 +9,17 @@ router.get("/", async (req, res) => {
   const startTime = Date.now();
   try {
     console.log(`[${requestId}] Step 1: Authenticating with e-invoice API...`);
-    const response = await fetch(
-      "https://staging.fynamics.co.in/api/authentication",
-      {
-        method: "POST",
-        headers: {
-          accept: "application/json",
-          clientId: process.env.EINVOICE_CLIENT_ID,
-          clientSecret: process.env.EINVOICE_CLIENT_SECRET,
-        },
+    const response = await fetch("https://fynamics.co.in/api/authenticate", {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        clientId: process.env.EINVOICE_CLIENT_ID,
+        clientSecret: process.env.EINVOICE_CLIENT_SECRET,
       },
-    );
+    });
 
     const data = await response.json();
+    console.log(data);
     console.log(
       `[${requestId}] Step 1 Response:`,
       JSON.stringify({
