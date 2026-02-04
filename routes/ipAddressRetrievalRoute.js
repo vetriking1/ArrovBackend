@@ -9,14 +9,18 @@ router.get("/", async (req, res) => {
   const startTime = Date.now();
   try {
     console.log(`[${requestId}] Step 1: Authenticating with e-invoice API...`);
-    const response = await fetch("https://fynamics.co.in/api/authenticate", {
-      method: "GET", // Changed from POST to GET based on the error
-      headers: {
-        accept: "application/json",
-        clientId: process.env.EINVOICE_CLIENT_ID,
-        clientSecret: process.env.EINVOICE_CLIENT_SECRET,
-      },
-    });
+    const response = await fetch(
+      "https://www.fynamics.co.in/api/authenticate",
+      {
+        method: "POST", // Using POST as required by the API
+        headers: {
+          accept: "application/json",
+          clientId: process.env.EINVOICE_CLIENT_ID,
+          clientSecret: process.env.EINVOICE_CLIENT_SECRET,
+        },
+        // No body - credentials are passed via headers
+      }
+    );
 
     // Check if response is OK before parsing JSON
     if (!response.ok) {
