@@ -10,13 +10,36 @@ router.get("/", async (req, res) => {
   try {
     console.log(`[${requestId}] Step 1: Authenticating with e-invoice API...`);
     const response = await fetch("https://fynamics.co.in/api/authenticate", {
-      method: "POST",
+      method: "GET", // Changed from POST to GET based on the error
       headers: {
         accept: "application/json",
         clientId: process.env.EINVOICE_CLIENT_ID,
         clientSecret: process.env.EINVOICE_CLIENT_SECRET,
       },
     });
+
+    // Check if response is OK before parsing JSON
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(
+        `[${requestId}] API Error (${response.status}):`,
+        errorText
+      );
+      return res.status(response.status).json({
+        status: 0,
+        errorMessage: `API Error: ${errorText}`,
+      });
+    }
+
+    const contentType = response.headers.get("content-type");
+    if (!contentType || !contentType.includes("application/json")) {
+      const text = await response.text();
+      console.error(`[${requestId}] Non-JSON response:`, text);
+      return res.status(500).json({
+        status: 0,
+        errorMessage: "Invalid response format from e-invoice API",
+      });
+    }
 
     const data = await response.json();
     console.log(data);
@@ -25,8 +48,9 @@ router.get("/", async (req, res) => {
       JSON.stringify({
         status: data.status,
         hasAccessToken: !!data.data?.accessToken,
-      }),
+      })
     );
+    return res.json(data);
   } catch (error) {
     const duration = Date.now() - startTime;
     console.error(`[${requestId}] Error after ${duration}ms:`, error);
