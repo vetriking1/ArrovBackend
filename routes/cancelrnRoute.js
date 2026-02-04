@@ -23,13 +23,14 @@ router.post("/", async (req, res) => {
       `[${requestId}] Cancel Reason: ${cancel_reason || "Not provided"}`
     );
 
-    if (!invoice_no || !irn || !cancel_reason_code) {
+    if (!invoice_no || !irn || !cancel_reason_code || !cancel_reason) {
       console.log(
-        `[${requestId}] Validation Failed: invoice_no, irn, and cancel_reason_code are required`
+        `[${requestId}] Validation Failed: invoice_no, irn, cancel_reason_code, and cancel_reason are required`
       );
       return res.status(400).json({
         status: 0,
-        errorMessage: "invoice_no, irn, and cancel_reason_code are required",
+        errorMessage:
+          "invoice_no, irn, cancel_reason_code, and cancel_reason are required",
       });
     }
 

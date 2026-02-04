@@ -3,6 +3,7 @@ import cors from "cors";
 
 import cancelIrnRoute from "./routes/cancelrnRoute.js";
 import generateIrnRoute from "./routes/generateIrnRoute.js";
+import getIpRoute from "./routes/ipAddressRetrievalRoute.js";
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -26,6 +27,7 @@ app.use(
 
 app.use("/api/cancelIrn", cancelIrnRoute);
 app.use("/api/generateIrn", generateIrnRoute);
+app.use("/api/checkIp", getIpRoute);
 
 app.get("/", (req, res) => {
   res.send("This is Invoice Server");
