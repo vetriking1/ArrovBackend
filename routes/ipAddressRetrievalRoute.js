@@ -1,10 +1,10 @@
 import { Router } from "express";
 import dotenv from "dotenv";
+// Specify the path to your desired file
 dotenv.config();
-
 const router = Router();
 
-router.post("/", async (req, res) => {
+router.get("/", async (req, res) => {
   const requestId = Date.now();
   const startTime = Date.now();
   try {
@@ -29,37 +29,6 @@ router.post("/", async (req, res) => {
         hasAccessToken: !!data.data?.accessToken,
       })
     );
-
-    if (data.status === 1) {
-      console.log(`[${requestId}] Step 2: IP Address retrieval endpoint`);
-      const authResponse = await fetch(
-        "https://staging.fynamics.co.in/gst/ipaddress",
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${data.data.accessToken}`,
-          },
-        }
-      );
-
-      const authData = await authResponse.json();
-      console.log(
-        `[${requestId}] Step 2 Response:`,
-        JSON.stringify({
-          Status: authData.Status,
-        })
-      );
-
-      return res.json({
-        status: 1,
-        data: authData,
-      });
-    } else {
-      return res.status(401).json({
-        status: 0,
-        errorMessage: "Authentication failed",
-      });
-    }
   } catch (error) {
     const duration = Date.now() - startTime;
     console.error(`[${requestId}] Error after ${duration}ms:`, error);

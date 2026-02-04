@@ -4,8 +4,6 @@ import cors from "cors";
 import cancelIrnRoute from "./routes/cancelrnRoute.js";
 import generateIrnRoute from "./routes/generateIrnRoute.js";
 import getIpRoute from "./routes/ipAddressRetrievalRoute.js";
-import dotenv from "dotenv";
-dotenv.config();
 
 const app = express();
 
