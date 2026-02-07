@@ -69,7 +69,7 @@ router.post("/", async (req, res) => {
     }
 
     console.log(`[${requestId}] Step 1: Authenticating with e-invoice API...`);
-    const response = await fetch("https://fynamics.co.in/api/authenticate", {
+    const response = await fetch("https://www.fynamics.co.in/api/authenticate", {
       method: "POST",
       headers: {
         accept: "application/json",
@@ -90,7 +90,7 @@ router.post("/", async (req, res) => {
     if (data.status === 1) {
       console.log(`[${requestId}] Step 2: Enhanced authentication...`);
       const authResponse = await fetch(
-        "https://fynamics.co.in/api/einvoice/enhanced/authentication",
+        "https://www.fynamics.co.in/api/einvoice/enhanced/authentication",
         {
           method: "POST",
           headers: {
@@ -121,7 +121,7 @@ router.post("/", async (req, res) => {
           `[${requestId}] Step 3: Cancelling IRN ${irn} for invoice ${invoice_no}...`
         );
         const cancelResponse = await fetch(
-          "https://fynamics.co.in/api/einvoice/enhanced/cancel-irn",
+          "https://www.fynamics.co.in/api/einvoice/enhanced/cancel-irn",
           {
             method: "POST",
             headers: {
