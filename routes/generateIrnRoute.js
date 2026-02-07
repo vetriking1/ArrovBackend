@@ -201,6 +201,31 @@ router.post("/", async (req, res) => {
         }
       );
 
+      // Check if response is OK and content-type is JSON
+      if (!authResponse.ok) {
+        const contentType = authResponse.headers.get("content-type");
+        let errorMessage = `HTTP ${authResponse.status}: ${authResponse.statusText}`;
+        
+        if (contentType && contentType.includes("application/json")) {
+          const errorData = await authResponse.json();
+          errorMessage = errorData.errorMessage || errorData.message || errorMessage;
+        } else {
+          const textResponse = await authResponse.text();
+          errorMessage = textResponse || errorMessage;
+        }
+        
+        console.error(`[${requestId}] Authentication API Error:`, errorMessage);
+        return res.status(400).json({
+          error: "IRN Generation Failed - Authentication API Error",
+          details: errorMessage,
+          apiResponse: {
+            status: authResponse.status,
+            statusText: authResponse.statusText,
+            timestamp: new Date().toISOString(),
+          },
+        });
+      }
+
       const authApiData = await authResponse.json();
       console.log(
         `[${requestId}] Step 1 - Access token response:`,
@@ -245,6 +270,31 @@ router.post("/", async (req, res) => {
           }),
         }
       );
+
+      // Check if response is OK and content-type is JSON
+      if (!enhancedAuthResponse.ok) {
+        const contentType = enhancedAuthResponse.headers.get("content-type");
+        let errorMessage = `HTTP ${enhancedAuthResponse.status}: ${enhancedAuthResponse.statusText}`;
+        
+        if (contentType && contentType.includes("application/json")) {
+          const errorData = await enhancedAuthResponse.json();
+          errorMessage = errorData.ErrorMessage || errorData.Message || errorData.message || errorMessage;
+        } else {
+          const textResponse = await enhancedAuthResponse.text();
+          errorMessage = textResponse || errorMessage;
+        }
+        
+        console.error(`[${requestId}] Enhanced Authentication API Error:`, errorMessage);
+        return res.status(400).json({
+          error: "IRN Generation Failed - Enhanced Authentication API Error",
+          details: errorMessage,
+          apiResponse: {
+            status: enhancedAuthResponse.status,
+            statusText: enhancedAuthResponse.statusText,
+            timestamp: new Date().toISOString(),
+          },
+        });
+      }
 
       const enhancedAuthData = await enhancedAuthResponse.json();
       console.log(
