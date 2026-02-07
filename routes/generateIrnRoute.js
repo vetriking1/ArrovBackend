@@ -292,6 +292,31 @@ router.post("/", async (req, res) => {
         }
       );
 
+      // Check if response is OK and content-type is JSON
+      if (!irnResponse.ok) {
+        const contentType = irnResponse.headers.get("content-type");
+        let errorMessage = `HTTP ${irnResponse.status}: ${irnResponse.statusText}`;
+        
+        if (contentType && contentType.includes("application/json")) {
+          const errorData = await irnResponse.json();
+          errorMessage = errorData.ErrorMessage || errorData.message || errorMessage;
+        } else {
+          const textResponse = await irnResponse.text();
+          errorMessage = textResponse || errorMessage;
+        }
+        
+        console.error(`[${requestId}] IRN API Error:`, errorMessage);
+        return res.status(400).json({
+          error: "IRN Generation Failed - API Error",
+          details: errorMessage,
+          apiResponse: {
+            status: irnResponse.status,
+            statusText: irnResponse.statusText,
+            timestamp: new Date().toISOString(),
+          },
+        });
+      }
+
       irnData = await irnResponse.json();
       console.log(
         `[${requestId}] Step 3 - IRN generation response:`,
