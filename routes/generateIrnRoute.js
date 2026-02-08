@@ -5,6 +5,13 @@ import dotenv from "dotenv";
 dotenv.config();
 
 import { generateInvoiceJSONB, getStateCodeFromGSTIN } from "../lib/invoice.js";
+import {
+  getAccessToken,
+  setAccessToken,
+  shouldForceRefresh,
+  getAuthData,
+  setAuthData,
+} from "../lib/tokenCache.js";
 
 const router = Router();
 
@@ -185,140 +192,166 @@ router.post("/", async (req, res) => {
         invoice_no
       );
 
-      // Step 1: Get access token
-      console.log(
-        `[${requestId}] Step 1: Authenticating with e-invoice API...`
-      );
-      const authResponse = await fetch(
-        "https://www.fynamics.co.in/api/authenticate",
-        {
-          method: "POST",
-          headers: {
-            accept: "application/json",
-            clientId: process.env.EINVOICE_CLIENT_ID,
-            clientSecret: process.env.EINVOICE_CLIENT_SECRET,
-          },
-        }
-      );
-
-      // Check if response is OK and content-type is JSON
-      if (!authResponse.ok) {
-        const contentType = authResponse.headers.get("content-type");
-        let errorMessage = `HTTP ${authResponse.status}: ${authResponse.statusText}`;
-        
-        if (contentType && contentType.includes("application/json")) {
-          const errorData = await authResponse.json();
-          errorMessage = errorData.errorMessage || errorData.message || errorMessage;
-        } else {
-          const textResponse = await authResponse.text();
-          errorMessage = textResponse || errorMessage;
-        }
-        
-        console.error(`[${requestId}] Authentication API Error:`, errorMessage);
-        return res.status(400).json({
-          error: "IRN Generation Failed - Authentication API Error",
-          details: errorMessage,
-          apiResponse: {
-            status: authResponse.status,
-            statusText: authResponse.statusText,
-            timestamp: new Date().toISOString(),
-          },
-        });
-      }
-
-      const authApiData = await authResponse.json();
-      console.log(
-        `[${requestId}] Step 1 - Access token response:`,
-        authApiData.status
-      );
-
-      if (authApiData.status !== 1) {
-        console.error(
-          `[${requestId}] Authentication Failed:`,
-          authApiData.errorMessage || authApiData.message
+      // Step 1: Get access token (with caching)
+      let accessToken = getAccessToken();
+      
+      if (!accessToken) {
+        console.log(
+          `[${requestId}] Step 1: Authenticating with e-invoice API (no cached token)...`
         );
-        return res.status(400).json({
-          error: "IRN Generation Failed - Authentication Error",
-          details:
-            authApiData.errorMessage ||
-            authApiData.message ||
-            "Failed to get access token",
-          apiResponse: {
-            status: authApiData.status,
-            errorCode: authApiData.errorCode,
-            timestamp: new Date().toISOString(),
-          },
-        });
-      }
-
-      // Step 2: Enhanced authentication
-      console.log(`[${requestId}] Step 2: Enhanced authentication...`);
-      const enhancedAuthResponse = await fetch(
-        "https://www.fynamics.co.in/api/einvoice/enhanced/authentication",
-        {
-          method: "POST",
-          headers: {
-            accept: "application/json",
-            gstin: process.env.GSTIN,
-            Authorization: `Bearer ${authApiData.data.accessToken}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            Username: process.env.EINVOICE_USERNAME,
-            Password: process.env.EINVOICE_PASSWORD,
-            ForceRefreshAccessToken: false,
-          }),
-        }
-      );
-
-      // Check if response is OK and content-type is JSON
-      if (!enhancedAuthResponse.ok) {
-        const contentType = enhancedAuthResponse.headers.get("content-type");
-        let errorMessage = `HTTP ${enhancedAuthResponse.status}: ${enhancedAuthResponse.statusText}`;
-        
-        if (contentType && contentType.includes("application/json")) {
-          const errorData = await enhancedAuthResponse.json();
-          errorMessage = errorData.ErrorMessage || errorData.Message || errorData.message || errorMessage;
-        } else {
-          const textResponse = await enhancedAuthResponse.text();
-          errorMessage = textResponse || errorMessage;
-        }
-        
-        console.error(`[${requestId}] Enhanced Authentication API Error:`, errorMessage);
-        return res.status(400).json({
-          error: "IRN Generation Failed - Enhanced Authentication API Error",
-          details: errorMessage,
-          apiResponse: {
-            status: enhancedAuthResponse.status,
-            statusText: enhancedAuthResponse.statusText,
-            timestamp: new Date().toISOString(),
-          },
-        });
-      }
-
-      const enhancedAuthData = await enhancedAuthResponse.json();
-      console.log(
-        `[${requestId}] Step 2 - Enhanced auth response:`,
-        enhancedAuthData.Status
-      );
-
-      if (enhancedAuthData.Status !== 1) {
-        console.error(
-          `[${requestId}] Enhanced Authentication Failed:`,
-          enhancedAuthData.ErrorMessage || enhancedAuthData.Message
+        const authResponse = await fetch(
+          "https://staging.fynamics.co.in/api/authenticate",
+          {
+            method: "POST",
+            headers: {
+              accept: "application/json",
+              clientId: process.env.EINVOICE_CLIENT_ID,
+              clientSecret: process.env.EINVOICE_CLIENT_SECRET,
+            },
+          }
         );
-        return res.status(400).json({
-          error: "IRN Generation Failed - Enhanced Authentication Error",
-          details:
-            enhancedAuthData.ErrorMessage ||
-            enhancedAuthData.Message ||
-            "Enhanced authentication failed",
-          apiResponse: {
-            status: enhancedAuthData.Status,
-            errorCode: enhancedAuthData.ErrorCode,
-            timestamp: new Date().toISOString(),
-          },
-        });
+
+        // Check if response is OK and content-type is JSON
+        if (!authResponse.ok) {
+          const contentType = authResponse.headers.get("content-type");
+          let errorMessage = `HTTP ${authResponse.status}: ${authResponse.statusText}`;
+          
+          if (contentType && contentType.includes("application/json")) {
+            const errorData = await authResponse.json();
+            errorMessage = errorData.errorMessage || errorData.message || errorMessage;
+          } else {
+            const textResponse = await authResponse.text();
+            errorMessage = textResponse || errorMessage;
+          }
+          
+          console.error(`[${requestId}] Authentication API Error:`, errorMessage);
+          return res.status(400).json({
+            error: "IRN Generation Failed - Authentication API Error",
+            details: errorMessage,
+            apiResponse: {
+              status: authResponse.status,
+              statusText: authResponse.statusText,
+              timestamp: new Date().toISOString(),
+            },
+          });
+        }
+
+        const authApiData = await authResponse.json();
+        console.log(
+          `[${requestId}] Step 1 - Access token response:`,
+          authApiData.status
+        );
+
+        if (authApiData.status !== 1) {
+          console.error(
+            `[${requestId}] Authentication Failed:`,
+            authApiData.errorMessage || authApiData.message
+          );
+          return res.status(400).json({
+            error: "IRN Generation Failed - Authentication Error",
+            details:
+              authApiData.errorMessage ||
+              authApiData.message ||
+              "Failed to get access token",
+            apiResponse: {
+              status: authApiData.status,
+              errorCode: authApiData.errorCode,
+              timestamp: new Date().toISOString(),
+            },
+          });
+        }
+
+        accessToken = authApiData.data.accessToken;
+        setAccessToken(accessToken);
+        console.log(`[${requestId}] Access token cached successfully`);
+      } else {
+        console.log(`[${requestId}] Step 1: Using cached access token`);
+      }
+
+      // Step 2: Enhanced authentication (with caching)
+      let authData = getAuthData();
+      
+      if (!authData) {
+        console.log(`[${requestId}] Step 2: Enhanced authentication (no cached auth)...`);
+        const forceRefresh = shouldForceRefresh();
+        
+        const enhancedAuthResponse = await fetch(
+          "https://staging.fynamics.co.in/api/einvoice/enhanced/authentication",
+          {
+            method: "POST",
+            headers: {
+              accept: "application/json",
+              gstin: process.env.GSTIN,
+              Authorization: `Bearer ${accessToken}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              Username: process.env.EINVOICE_USERNAME,
+              Password: process.env.EINVOICE_PASSWORD,
+              ForceRefreshAccessToken: forceRefresh,
+            }),
+          }
+        );
+
+        // Check if response is OK and content-type is JSON
+        if (!enhancedAuthResponse.ok) {
+          const contentType = enhancedAuthResponse.headers.get("content-type");
+          let errorMessage = `HTTP ${enhancedAuthResponse.status}: ${enhancedAuthResponse.statusText}`;
+          
+          if (contentType && contentType.includes("application/json")) {
+            const errorData = await enhancedAuthResponse.json();
+            errorMessage = errorData.ErrorMessage || errorData.Message || errorData.message || errorMessage;
+          } else {
+            const textResponse = await enhancedAuthResponse.text();
+            errorMessage = textResponse || errorMessage;
+          }
+          
+          console.error(`[${requestId}] Enhanced Authentication API Error:`, errorMessage);
+          return res.status(400).json({
+            error: "IRN Generation Failed - Enhanced Authentication API Error",
+            details: errorMessage,
+            apiResponse: {
+              status: enhancedAuthResponse.status,
+              statusText: enhancedAuthResponse.statusText,
+              timestamp: new Date().toISOString(),
+            },
+          });
+        }
+
+        const enhancedAuthData = await enhancedAuthResponse.json();
+        console.log(
+          `[${requestId}] Step 2 - Enhanced auth response:`,
+          enhancedAuthData.Status
+        );
+
+        if (enhancedAuthData.Status !== 1) {
+          console.error(
+            `[${requestId}] Enhanced Authentication Failed:`,
+            enhancedAuthData.ErrorMessage || enhancedAuthData.Message
+          );
+          return res.status(400).json({
+            error: "IRN Generation Failed - Enhanced Authentication Error",
+            details:
+              enhancedAuthData.ErrorMessage ||
+              enhancedAuthData.Message ||
+              "Enhanced authentication failed",
+            apiResponse: {
+              status: enhancedAuthData.Status,
+              errorCode: enhancedAuthData.ErrorCode,
+              timestamp: new Date().toISOString(),
+            },
+          });
+        }
+
+        authData = {
+          authToken: enhancedAuthData.Data.AuthToken,
+          sek: enhancedAuthData.Data.Sek,
+          userName: enhancedAuthData.Data.UserName,
+        };
+        setAuthData(authData.authToken, authData.sek, authData.userName);
+        console.log(`[${requestId}] Auth data cached successfully`);
+      } else {
+        console.log(`[${requestId}] Step 2: Using cached auth data`);
       }
 
       // Step 3: Generate IRN
@@ -326,16 +359,16 @@ router.post("/", async (req, res) => {
         `[${requestId}] Step 3: Generating IRN for invoice ${invoice_no}...`
       );
       const irnResponse = await fetch(
-        "https://www.fynamics.co.in/api/einvoice/enhanced/generate-irn",
+        "https://staging.fynamics.co.in/api/einvoice/enhanced/generate-irn",
         {
           method: "POST",
           headers: {
             accept: "application/json",
             gstin: process.env.GSTIN,
-            AuthToken: enhancedAuthData.Data.AuthToken,
-            user_name: enhancedAuthData.Data.UserName,
-            sek: enhancedAuthData.Data.Sek,
-            Authorization: `Bearer ${authApiData.data.accessToken}`,
+            AuthToken: authData.authToken,
+            user_name: authData.userName,
+            sek: authData.sek,
+            Authorization: `Bearer ${accessToken}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify(invoiceData),
