@@ -1,6 +1,5 @@
 import { Router } from "express";
 import { createSupabaseServer } from "../config.js";
-
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -194,13 +193,13 @@ router.post("/", async (req, res) => {
 
       // Step 1: Get access token (with caching)
       let accessToken = getAccessToken();
-      
+
       if (!accessToken) {
         console.log(
           `[${requestId}] Step 1: Authenticating with e-invoice API (no cached token)...`
         );
         const authResponse = await fetch(
-          "https://staging.fynamics.co.in/api/authenticate",
+          "https://www.fynamics.co.in/api/authenticate",
           {
             method: "POST",
             headers: {
@@ -215,16 +214,20 @@ router.post("/", async (req, res) => {
         if (!authResponse.ok) {
           const contentType = authResponse.headers.get("content-type");
           let errorMessage = `HTTP ${authResponse.status}: ${authResponse.statusText}`;
-          
+
           if (contentType && contentType.includes("application/json")) {
             const errorData = await authResponse.json();
-            errorMessage = errorData.errorMessage || errorData.message || errorMessage;
+            errorMessage =
+              errorData.errorMessage || errorData.message || errorMessage;
           } else {
             const textResponse = await authResponse.text();
             errorMessage = textResponse || errorMessage;
           }
-          
-          console.error(`[${requestId}] Authentication API Error:`, errorMessage);
+
+          console.error(
+            `[${requestId}] Authentication API Error:`,
+            errorMessage
+          );
           return res.status(400).json({
             error: "IRN Generation Failed - Authentication API Error",
             details: errorMessage,
@@ -270,13 +273,15 @@ router.post("/", async (req, res) => {
 
       // Step 2: Enhanced authentication (with caching)
       let authData = getAuthData();
-      
+
       if (!authData) {
-        console.log(`[${requestId}] Step 2: Enhanced authentication (no cached auth)...`);
+        console.log(
+          `[${requestId}] Step 2: Enhanced authentication (no cached auth)...`
+        );
         const forceRefresh = shouldForceRefresh();
-        
+
         const enhancedAuthResponse = await fetch(
-          "https://staging.fynamics.co.in/api/einvoice/enhanced/authentication",
+          "https://www.fynamics.co.in/api/einvoice/enhanced/authentication",
           {
             method: "POST",
             headers: {
@@ -297,16 +302,23 @@ router.post("/", async (req, res) => {
         if (!enhancedAuthResponse.ok) {
           const contentType = enhancedAuthResponse.headers.get("content-type");
           let errorMessage = `HTTP ${enhancedAuthResponse.status}: ${enhancedAuthResponse.statusText}`;
-          
+
           if (contentType && contentType.includes("application/json")) {
             const errorData = await enhancedAuthResponse.json();
-            errorMessage = errorData.ErrorMessage || errorData.Message || errorData.message || errorMessage;
+            errorMessage =
+              errorData.ErrorMessage ||
+              errorData.Message ||
+              errorData.message ||
+              errorMessage;
           } else {
             const textResponse = await enhancedAuthResponse.text();
             errorMessage = textResponse || errorMessage;
           }
-          
-          console.error(`[${requestId}] Enhanced Authentication API Error:`, errorMessage);
+
+          console.error(
+            `[${requestId}] Enhanced Authentication API Error:`,
+            errorMessage
+          );
           return res.status(400).json({
             error: "IRN Generation Failed - Enhanced Authentication API Error",
             details: errorMessage,
@@ -359,7 +371,7 @@ router.post("/", async (req, res) => {
         `[${requestId}] Step 3: Generating IRN for invoice ${invoice_no}...`
       );
       const irnResponse = await fetch(
-        "https://staging.fynamics.co.in/api/einvoice/enhanced/generate-irn",
+        "https://www.fynamics.co.in/api/einvoice/enhanced/generate-irn",
         {
           method: "POST",
           headers: {
@@ -379,15 +391,16 @@ router.post("/", async (req, res) => {
       if (!irnResponse.ok) {
         const contentType = irnResponse.headers.get("content-type");
         let errorMessage = `HTTP ${irnResponse.status}: ${irnResponse.statusText}`;
-        
+
         if (contentType && contentType.includes("application/json")) {
           const errorData = await irnResponse.json();
-          errorMessage = errorData.ErrorMessage || errorData.message || errorMessage;
+          errorMessage =
+            errorData.ErrorMessage || errorData.message || errorMessage;
         } else {
           const textResponse = await irnResponse.text();
           errorMessage = textResponse || errorMessage;
         }
-        
+
         console.error(`[${requestId}] IRN API Error:`, errorMessage);
         return res.status(400).json({
           error: "IRN Generation Failed - API Error",

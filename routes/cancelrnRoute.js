@@ -76,20 +76,23 @@ router.post("/", async (req, res) => {
     }
 
     console.log(`[${requestId}] Step 1: Authenticating with e-invoice API...`);
-    
+
     // Step 1: Get access token (with caching)
     let accessToken = getAccessToken();
-    
+
     if (!accessToken) {
       console.log(`[${requestId}] No cached access token, fetching new one...`);
-      const response = await fetch("https://staging.fynamics.co.in/api/authenticate", {
-        method: "POST",
-        headers: {
-          accept: "application/json",
-          clientId: process.env.EINVOICE_CLIENT_ID,
-          clientSecret: process.env.EINVOICE_CLIENT_SECRET,
-        },
-      });
+      const response = await fetch(
+        "https://www.fynamics.co.in/api/authenticate",
+        {
+          method: "POST",
+          headers: {
+            accept: "application/json",
+            clientId: process.env.EINVOICE_CLIENT_ID,
+            clientSecret: process.env.EINVOICE_CLIENT_SECRET,
+          },
+        }
+      );
 
       const data = await response.json();
       console.log(
@@ -114,13 +117,15 @@ router.post("/", async (req, res) => {
 
     // Step 2: Enhanced authentication (with caching)
     let authData = getAuthData();
-    
+
     if (!authData) {
-      console.log(`[${requestId}] Step 2: Enhanced authentication (no cached auth)...`);
+      console.log(
+        `[${requestId}] Step 2: Enhanced authentication (no cached auth)...`
+      );
       const forceRefresh = shouldForceRefresh();
-      
+
       const authResponse = await fetch(
-        "https://staging.fynamics.co.in/api/einvoice/enhanced/authentication",
+        "https://www.fynamics.co.in/api/einvoice/enhanced/authentication",
         {
           method: "POST",
           headers: {
@@ -147,7 +152,9 @@ router.post("/", async (req, res) => {
       );
 
       if (authResponseData.Status !== 1) {
-        console.log(`[${requestId}] Step 2 Failed: Status ${authResponseData.Status}`);
+        console.log(
+          `[${requestId}] Step 2 Failed: Status ${authResponseData.Status}`
+        );
         return res.json(authResponseData);
       }
 
@@ -167,7 +174,7 @@ router.post("/", async (req, res) => {
       `[${requestId}] Step 3: Cancelling IRN ${irn} for invoice ${invoice_no}...`
     );
     const cancelResponse = await fetch(
-      "https://staging.fynamics.co.in/api/einvoice/enhanced/cancel-irn",
+      "https://www.fynamics.co.in/api/einvoice/enhanced/cancel-irn",
       {
         method: "POST",
         headers: {
