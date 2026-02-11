@@ -3,6 +3,7 @@ import cors from "cors";
 
 import cancelIrnRoute from "./routes/cancelrnRoute.js";
 import generateIrnRoute from "./routes/generateIrnRoute.js";
+import regenerateIrnRoute from "./routes/regenerateIrnRoute.js";
 import getIpRoute from "./routes/ipAddressRetrievalRoute.js";
 
 const app = express();
@@ -25,6 +26,7 @@ app.use(
 
 app.use("/api/cancelIrn", cancelIrnRoute);
 app.use("/api/generateIrn", generateIrnRoute);
+app.use("/api/regenerateIrn", regenerateIrnRoute);
 app.use("/api/checkIp", getIpRoute);
 
 app.get("/", (req, res) => {

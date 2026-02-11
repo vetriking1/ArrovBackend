@@ -184,6 +184,7 @@ router.post("/", async (req, res) => {
 
     // STEP 1: Generate IRN first before creating invoice (skip for NON BILLING)
     let irnData = null;
+    let irnError = null;
 
     if (body.invoice_type !== "NON BILLING") {
       console.log(
@@ -428,7 +429,11 @@ router.post("/", async (req, res) => {
           errorCount: irnData.ErrorDetails ? irnData.ErrorDetails.length : 0,
         });
 
-        // Extract detailed error message
+        console.log(
+          `[${requestId}] IRN generation failed, but will continue to save invoice to database`
+        );
+
+        // Extract detailed error message for response
         let errorDetails = "IRN generation was unsuccessful";
         let errorCode = null;
 
@@ -483,7 +488,8 @@ router.post("/", async (req, res) => {
           errorDetails = irnData.message;
         }
 
-        return res.status(400).json({
+        // Store error for response
+        irnError = {
           error: "IRN Generation Failed",
           details: errorDetails,
           errorCode: errorCode,
@@ -492,10 +498,13 @@ router.post("/", async (req, res) => {
             errorCode: errorCode,
             timestamp: new Date().toISOString(),
           },
-        });
-      }
+        };
 
-      console.log(`[${requestId}] IRN generated successfully:`, irnData.Irn);
+        // Set irnData to null so invoice is saved without IRN
+        irnData = null;
+      } else {
+        console.log(`[${requestId}] IRN generated successfully:`, irnData.Irn);
+      }
     } else {
       console.log(
         `[${requestId}] Skipping IRN generation for NON BILLING invoice:`,
@@ -513,7 +522,7 @@ router.post("/", async (req, res) => {
       discount: Number(body.discount || 0),
       gst_percentage: Number(body.gst_percentage || 18),
       invoice_data: invoiceData,
-      ...(irnData && {
+      ...(irnData && irnData.Irn && {
         irn: irnData.Irn,
         qrcode: irnData.SignedQRCode,
         ack_no: irnData.AckNo,
@@ -619,6 +628,10 @@ router.post("/", async (req, res) => {
           ack_no: invoiceResult.ack_no,
           status: "GENERATED",
         },
+      }),
+      ...(irnError && {
+        irnError: irnError,
+        warning: "Invoice saved successfully but IRN generation failed",
       }),
     });
   } catch (error) {
