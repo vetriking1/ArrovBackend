@@ -83,7 +83,7 @@ router.post("/", async (req, res) => {
     if (!accessToken) {
       console.log(`[${requestId}] No cached access token, fetching new one...`);
       const response = await fetch(
-        "https://www.fynamics.co.in/api/authenticate",
+        "https://staging.fynamics.co.in/api/authenticate",
         {
           method: "POST",
           headers: {
@@ -125,7 +125,7 @@ router.post("/", async (req, res) => {
       const forceRefresh = shouldForceRefresh();
 
       const authResponse = await fetch(
-        "https://www.fynamics.co.in/api/einvoice/enhanced/authentication",
+        "https://staging.fynamics.co.in/api/einvoice/enhanced/authentication",
         {
           method: "POST",
           headers: {
@@ -174,7 +174,7 @@ router.post("/", async (req, res) => {
       `[${requestId}] Step 3: Cancelling IRN ${irn} for invoice ${invoice_no}...`
     );
     const cancelResponse = await fetch(
-      "https://www.fynamics.co.in/api/einvoice/enhanced/cancel-irn",
+      "https://staging.fynamics.co.in/api/einvoice/enhanced/cancel-irn",
       {
         method: "POST",
         headers: {

@@ -76,13 +76,11 @@ router.post("/", async (req, res) => {
 
     // Check if invoice already has IRN
     if (invoice.irn) {
-      console.log(
-        `[${requestId}] Invoice already has IRN:`,
-        invoice.irn
-      );
+      console.log(`[${requestId}] Invoice already has IRN:`, invoice.irn);
       return res.status(400).json({
         error: "IRN Already Exists",
-        details: "This invoice already has an IRN. Use cancel IRN first if you need to regenerate.",
+        details:
+          "This invoice already has an IRN. Use cancel IRN first if you need to regenerate.",
         existingIrn: invoice.irn,
       });
     }
@@ -111,7 +109,7 @@ router.post("/", async (req, res) => {
         `[${requestId}] Step 1: Authenticating with e-invoice API (no cached token)...`
       );
       const authResponse = await fetch(
-        "https://www.fynamics.co.in/api/authenticate",
+        "https://staging.fynamics.co.in/api/authenticate",
         {
           method: "POST",
           headers: {
@@ -135,10 +133,7 @@ router.post("/", async (req, res) => {
           errorMessage = textResponse || errorMessage;
         }
 
-        console.error(
-          `[${requestId}] Authentication API Error:`,
-          errorMessage
-        );
+        console.error(`[${requestId}] Authentication API Error:`, errorMessage);
         return res.status(400).json({
           error: "IRN Regeneration Failed - Authentication API Error",
           details: errorMessage,
@@ -192,7 +187,7 @@ router.post("/", async (req, res) => {
       const forceRefresh = shouldForceRefresh();
 
       const enhancedAuthResponse = await fetch(
-        "https://www.fynamics.co.in/api/einvoice/enhanced/authentication",
+        "https://staging.fynamics.co.in/api/einvoice/enhanced/authentication",
         {
           method: "POST",
           headers: {
@@ -281,7 +276,7 @@ router.post("/", async (req, res) => {
       `[${requestId}] Step 3: Generating IRN for invoice ${invoice.invoice_no}...`
     );
     const irnResponse = await fetch(
-      "https://www.fynamics.co.in/api/einvoice/enhanced/generate-irn",
+      "https://staging.fynamics.co.in/api/einvoice/enhanced/generate-irn",
       {
         method: "POST",
         headers: {
@@ -403,7 +398,7 @@ router.post("/", async (req, res) => {
         ack_no: irnData.AckNo,
         ack_dt: irnData.AckDt ? new Date(irnData.AckDt) : null,
         signed_invoice: irnData.SignedInvoice,
-        einvoice_status: "GENERATED"
+        einvoice_status: "GENERATED",
       })
       .eq("id", invoice_id)
       .select("*")

@@ -200,7 +200,7 @@ router.post("/", async (req, res) => {
           `[${requestId}] Step 1: Authenticating with e-invoice API (no cached token)...`
         );
         const authResponse = await fetch(
-          "https://www.fynamics.co.in/api/authenticate",
+          "https://staging.fynamics.co.in/api/authenticate",
           {
             method: "POST",
             headers: {
@@ -282,7 +282,7 @@ router.post("/", async (req, res) => {
         const forceRefresh = shouldForceRefresh();
 
         const enhancedAuthResponse = await fetch(
-          "https://www.fynamics.co.in/api/einvoice/enhanced/authentication",
+          "https://staging.fynamics.co.in/api/einvoice/enhanced/authentication",
           {
             method: "POST",
             headers: {
@@ -372,7 +372,7 @@ router.post("/", async (req, res) => {
         `[${requestId}] Step 3: Generating IRN for invoice ${invoice_no}...`
       );
       const irnResponse = await fetch(
-        "https://www.fynamics.co.in/api/einvoice/enhanced/generate-irn",
+        "https://staging.fynamics.co.in/api/einvoice/enhanced/generate-irn",
         {
           method: "POST",
           headers: {
@@ -522,14 +522,15 @@ router.post("/", async (req, res) => {
       discount: Number(body.discount || 0),
       gst_percentage: Number(body.gst_percentage || 18),
       invoice_data: invoiceData,
-      ...(irnData && irnData.Irn && {
-        irn: irnData.Irn,
-        qrcode: irnData.SignedQRCode,
-        ack_no: irnData.AckNo,
-        ack_dt: irnData.AckDt ? new Date(irnData.AckDt) : null,
-        signed_invoice: irnData.SignedInvoice,
-        einvoice_status: "GENERATED",
-      }),
+      ...(irnData &&
+        irnData.Irn && {
+          irn: irnData.Irn,
+          qrcode: irnData.SignedQRCode,
+          ack_no: irnData.AckNo,
+          ack_dt: irnData.AckDt ? new Date(irnData.AckDt) : null,
+          signed_invoice: irnData.SignedInvoice,
+          einvoice_status: "GENERATED",
+        }),
     };
 
     const { data: invoiceResult, error: invoiceError } = await supabase
