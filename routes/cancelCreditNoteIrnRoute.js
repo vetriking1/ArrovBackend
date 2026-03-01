@@ -15,59 +15,59 @@ const supabase = createSupabaseServer();
 
 router.post("/", async (req, res) => {
   const startTime = Date.now();
-  const requestId = `CAN-${Date.now()}-${Math.random()
+  const requestId = `CAN-CN-${Date.now()}-${Math.random()
     .toString(36)
     .substring(2, 9)}`;
 
   try {
-    const { invoice_no, irn, cancel_reason_code, cancel_reason } = req.body;
+    const { credit_note_no, irn, cancel_reason_code, cancel_reason } = req.body;
 
-    console.log(`[${requestId}] Cancel IRN Request Started`);
-    console.log(`[${requestId}] Invoice No: ${invoice_no}`);
+    console.log(`[${requestId}] Cancel Credit Note IRN Request Started`);
+    console.log(`[${requestId}] Credit Note No: ${credit_note_no}`);
     console.log(`[${requestId}] IRN: ${irn}`);
     console.log(`[${requestId}] Cancel Reason Code: ${cancel_reason_code}`);
     console.log(
       `[${requestId}] Cancel Reason: ${cancel_reason || "Not provided"}`
     );
 
-    if (!invoice_no || !irn || !cancel_reason_code || !cancel_reason) {
+    if (!credit_note_no || !irn || !cancel_reason_code || !cancel_reason) {
       console.log(
-        `[${requestId}] Validation Failed: invoice_no, irn, cancel_reason_code, and cancel_reason are required`
+        `[${requestId}] Validation Failed: credit_note_no, irn, cancel_reason_code, and cancel_reason are required`
       );
       return res.status(400).json({
         status: 0,
         errorMessage:
-          "invoice_no, irn, cancel_reason_code, and cancel_reason are required",
+          "credit_note_no, irn, cancel_reason_code, and cancel_reason are required",
       });
     }
 
-    console.log(`[${requestId}] Fetching invoice details for ${invoice_no}...`);
-    const { data: invoice } = await supabase
-      .from("invoices")
+    console.log(`[${requestId}] Fetching credit note details for ${credit_note_no}...`);
+    const { data: creditNote } = await supabase
+      .from("credit_notes")
       .select("id, unit_id")
-      .eq("invoice_no", invoice_no)
+      .eq("credit_note_no", credit_note_no)
       .single();
 
-    if (!invoice) {
-      console.log(`[${requestId}] Invoice not found: ${invoice_no}`);
+    if (!creditNote) {
+      console.log(`[${requestId}] Credit note not found: ${credit_note_no}`);
       return res.status(404).json({
         status: 0,
-        errorMessage: "Invoice not found",
+        errorMessage: "Credit note not found",
       });
     }
 
     console.log(
-      `[${requestId}] Fetching unit details for unit_id: ${invoice.unit_id}...`
+      `[${requestId}] Fetching unit details for unit_id: ${creditNote.unit_id}...`
     );
     const { data: unit } = await supabase
       .from("units")
       .select("gstin")
-      .eq("id", invoice.unit_id)
+      .eq("id", creditNote.unit_id)
       .single();
 
     if (!unit) {
       console.log(
-        `[${requestId}] Unit not found for unit_id: ${invoice.unit_id}`
+        `[${requestId}] Unit not found for unit_id: ${creditNote.unit_id}`
       );
       return res.status(404).json({
         status: 0,
@@ -83,7 +83,7 @@ router.post("/", async (req, res) => {
     if (!accessToken) {
       console.log(`[${requestId}] No cached access token, fetching new one...`);
       const response = await fetch(
-        "https://staging.fynamics.co.in/api/authenticate",
+        "https://www.fynamics.co.in/api/authenticate",
         {
           method: "POST",
           headers: {
@@ -125,7 +125,7 @@ router.post("/", async (req, res) => {
       const forceRefresh = shouldForceRefresh();
 
       const authResponse = await fetch(
-        "https://staging.fynamics.co.in/api/einvoice/enhanced/authentication",
+        "https://www.fynamics.co.in/api/einvoice/enhanced/authentication",
         {
           method: "POST",
           headers: {
@@ -171,10 +171,10 @@ router.post("/", async (req, res) => {
 
     // Step 3: Cancel IRN
     console.log(
-      `[${requestId}] Step 3: Cancelling IRN ${irn} for invoice ${invoice_no}...`
+      `[${requestId}] Step 3: Cancelling IRN ${irn} for credit note ${credit_note_no}...`
     );
     const cancelResponse = await fetch(
-      "https://staging.fynamics.co.in/api/einvoice/enhanced/cancel-irn",
+      "https://www.fynamics.co.in/api/einvoice/enhanced/cancel-irn",
       {
         method: "POST",
         headers: {
@@ -209,9 +209,9 @@ router.post("/", async (req, res) => {
         `[${requestId}] Step 4: Recording cancellation in database...`
       );
       const { error: cancelError } = await supabase
-        .from("canceled_invoices")
+        .from("canceled_credit_notes")
         .insert({
-          invoice_no,
+          credit_note_no,
           irn,
           cancel_reason_code,
           cancel_reason,
@@ -219,7 +219,7 @@ router.post("/", async (req, res) => {
 
       if (cancelError) {
         console.error(
-          `[${requestId}] Error inserting into canceled_invoices:`,
+          `[${requestId}] Error inserting into canceled_credit_notes:`,
           cancelError
         );
         return res.status(500).json({
@@ -231,31 +231,31 @@ router.post("/", async (req, res) => {
       console.log(`[${requestId}] Cancellation recorded successfully`);
 
       console.log(
-        `[${requestId}] Step 5: Updating invoice ${invoice_no} status to cancelled...`
+        `[${requestId}] Step 5: Updating credit note ${credit_note_no} status to cancelled...`
       );
       const { error: updateError } = await supabase
-        .from("invoices")
+        .from("credit_notes")
         .update({ is_cancelled: true })
-        .eq("invoice_no", invoice_no);
+        .eq("credit_note_no", credit_note_no);
 
       if (updateError) {
         console.error(
-          `[${requestId}] Error updating invoice is_cancelled:`,
+          `[${requestId}] Error updating credit note is_cancelled:`,
           updateError
         );
         return res.status(500).json({
           status: 0,
-          errorMessage: "Failed to update invoice status",
+          errorMessage: "Failed to update credit note status",
           details: updateError,
         });
       }
       console.log(
-        `[${requestId}] Invoice ${invoice_no} marked as cancelled successfully`
+        `[${requestId}] Credit note ${credit_note_no} marked as cancelled successfully`
       );
 
       const duration = Date.now() - startTime;
       console.log(
-        `[${requestId}] Cancel IRN Request Completed Successfully in ${duration}ms`
+        `[${requestId}] Cancel Credit Note IRN Request Completed Successfully in ${duration}ms`
       );
       return res.json(cancelData);
     }

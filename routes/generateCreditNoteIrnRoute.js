@@ -3,6 +3,7 @@ import { createSupabaseServer } from "../config.js";
 import dotenv from "dotenv";
 dotenv.config();
 
+import { generateCreditNoteJSONB, getStateCodeFromGSTIN } from "../lib/invoice.js";
 import {
   getAccessToken,
   setAccessToken,
@@ -15,14 +16,14 @@ const router = Router();
 
 router.post("/", async (req, res) => {
   const startTime = Date.now();
-  const requestId = `REGEN-${Date.now()}-${Math.random()
+  const requestId = `GEN-CN-${Date.now()}-${Math.random()
     .toString(36)
     .substring(2, 9)}`;
 
   try {
-    console.log(`[${requestId}] Regenerate IRN Request Started`);
+    console.log(`[${requestId}] Generate Credit Note IRN Request Started`);
 
-    // Validate required environment variables
+    // Validate required environment variables for IRN generation
     const requiredEnvVars = [
       "EINVOICE_CLIENT_ID",
       "EINVOICE_CLIENT_SECRET",
@@ -41,64 +42,153 @@ router.post("/", async (req, res) => {
         )}`
       );
       return res.status(500).json({
-        error: "IRN Regeneration Failed - Configuration Error",
+        error: "Credit Note IRN Generation Failed - Configuration Error",
         details: `Missing environment variables: ${missingEnvVars.join(", ")}`,
       });
     }
 
-    const { invoice_id } = req.body;
-
-    if (!invoice_id) {
-      return res.status(400).json({
-        error: "Validation Error",
-        details: "invoice_id is required",
-      });
-    }
-
-    console.log(`[${requestId}] Regenerating IRN for invoice_id:`, invoice_id);
-
+    const body = req.body;
     const supabase = createSupabaseServer();
 
-    // Fetch invoice from database
+    const unitId = Number(body.unit_id);
+    const customerId = Number(body.customer_id);
+    const invoiceNo = body.invoice_no;
+    const relatedInvoices = body.related_invoices || [];
+
+    console.log(`[${requestId}] Credit note creation request:`, {
+      unitId,
+      customerId,
+      invoiceNo,
+      relatedInvoices,
+    });
+
+    // Generate credit note number
+    const { data: rpcData, error: rpcError } = await supabase.rpc(
+      "generate_credit_note_number",
+      { p_unit_id: unitId }
+    );
+    if (rpcError) {
+      console.error(`[${requestId}] RPC Error:`, rpcError.message);
+      return res.status(400).json({ error: rpcError.message });
+    }
+   
+    const credit_note_no = rpcData;
+
+
+    // Fetch original invoice data
     const { data: invoice, error: invoiceError } = await supabase
       .from("invoices")
-      .select("*")
-      .eq("id", invoice_id)
+      .select("invoice_date, invoice_data")
+      .eq("invoice_no", invoiceNo)
       .single();
 
     if (invoiceError || !invoice) {
-      console.error(`[${requestId}] Invoice not found:`, invoiceError);
-      return res.status(404).json({
-        error: "Invoice not found",
-        details: invoiceError?.message || "No invoice with this ID",
+      console.error(`[${requestId}] Invoice not found:`, {
+        invoiceNo,
+        error: invoiceError,
       });
+      return res.status(404).json({ error: "Original invoice not found" });
     }
 
-    // Check if invoice already has IRN
-    if (invoice.irn) {
-      console.log(`[${requestId}] Invoice already has IRN:`, invoice.irn);
-      return res.status(400).json({
-        error: "IRN Already Exists",
-        details:
-          "This invoice already has an IRN. Use cancel IRN first if you need to regenerate.",
-        existingIrn: invoice.irn,
+    // Fetch customer data with enhanced fields
+    const { data: customer, error: customerError } = await supabase
+      .from("customers")
+      .select("name, gstin, trade_name, loc, pin, type")
+      .eq("id", customerId)
+      .single();
+
+    console.log(`[${requestId}] Customer query result:`, {
+      customerId,
+      found: !!customer,
+      error: customerError?.message,
+      customer: customer
+        ? { name: customer.name, gstin: customer.gstin }
+        : null,
+    });
+
+    if (customerError || !customer) {
+      console.error(`[${requestId}] Customer not found:`, {
+        customerId,
+        error: customerError,
       });
+      return res.status(404).json({ error: "Customer not found" });
     }
 
-    // Check if invoice_data exists
-    if (!invoice.invoice_data) {
-      console.error(`[${requestId}] Invoice data not found in database`);
-      return res.status(400).json({
-        error: "Invalid Invoice",
-        details: "Invoice data is missing. Cannot regenerate IRN.",
-      });
+    // Fetch unit data with enhanced fields
+    const { data: unit, error: unitError } = await supabase
+      .from("units")
+      .select("address, loc, pincode")
+      .eq("id", unitId)
+      .single();
+
+    if (unitError || !unit) {
+      return res.status(404).json({ error: "Unit not found" });
     }
 
-    const invoiceData = invoice.invoice_data;
+    // Fetch grade data with product description and service flag
+    const { data: gradeData, error: gradeError } = await supabase
+      .from("grades")
+      .select("product_description, is_service")
+      .eq("grade", body.grade)
+      .maybeSingle();
+
+    const productDesc =
+      gradeData?.product_description || `Ready-Mix Concrete – ${body.grade}`;
+    const isServc = gradeData?.is_service || "N";
+
+    // Determine if this is an inter-state transaction using GSTIN
+    const customerStateCode = getStateCodeFromGSTIN(customer.gstin || "");
+    const unitStateCode = customer.gstin.substring(0, 2);
+    const isInterState = customerStateCode !== unitStateCode;
+
+    // Generate credit note JSONB
+    const creditNoteData = generateCreditNoteJSONB({
+      creditNoteNo: credit_note_no,
+      creditNoteDate: new Date(body.credit_note_date),
+      originalInvoiceNo: invoiceNo,
+      originalInvoiceDate: new Date(invoice.invoice_date),
+      reasonForCreditNote: body.reason_for_credit_note || "Price/Quantity Adjustment",
+      poNumber: body.po_number || null,
+      customerGstin: customer.gstin || "",
+      customerName: customer.name,
+      customerTradeName: customer.trade_name,
+      customerType: customer.type || "B2B",
+      billingAddress: body.billing_address,
+      customerLoc: customer.loc,
+      customerPin: customer.pin,
+      customerStateCode: customerStateCode,
+      deliveryAddress: body.delivery_address,
+      deliveryLoc: body.delivery_loc,
+      deliveryPin: body.delivery_pin,
+      unitAddress: unit.address,
+      unitLoc: unit.loc,
+      unitPincode: unit.pincode,
+      unitStateCode: unitStateCode,
+      grade: body.grade,
+      productDesc: productDesc,
+      isServc: isServc,
+      hsnCode: body.hsn_code,
+      quantity: Number(body.adjusted_quantity),
+      rate: Number(body.adjusted_rate),
+      grossAmount: Number(body.adjusted_gross_amount),
+      discount: Number(body.adjusted_discount || 0),
+      taxableAmount: Number(body.adjusted_taxable_amount),
+      cgst: Number(body.cgst),
+      sgst: Number(body.sgst),
+      igst: Number(body.igst || 0),
+      roundOff: Number(body.round_off),
+      total: Number(body.total),
+      isInterState: isInterState,
+      gstPercentage: Number(body.gst_percentage || 18),
+    });
+
+    // STEP 1: Generate IRN for credit note
+    let irnData = null;
+    let irnError = null;
 
     console.log(
-      `[${requestId}] Starting IRN generation for invoice:`,
-      invoice.invoice_no
+      `[${requestId}] Starting IRN generation for credit note:`,
+      credit_note_no
     );
 
     // Step 1: Get access token (with caching)
@@ -133,9 +223,12 @@ router.post("/", async (req, res) => {
           errorMessage = textResponse || errorMessage;
         }
 
-        console.error(`[${requestId}] Authentication API Error:`, errorMessage);
+        console.error(
+          `[${requestId}] Authentication API Error:`,
+          errorMessage
+        );
         return res.status(400).json({
-          error: "IRN Regeneration Failed - Authentication API Error",
+          error: "Credit Note IRN Generation Failed - Authentication API Error",
           details: errorMessage,
           apiResponse: {
             status: authResponse.status,
@@ -157,7 +250,7 @@ router.post("/", async (req, res) => {
           authApiData.errorMessage || authApiData.message
         );
         return res.status(400).json({
-          error: "IRN Regeneration Failed - Authentication Error",
+          error: "Credit Note IRN Generation Failed - Authentication Error",
           details:
             authApiData.errorMessage ||
             authApiData.message ||
@@ -225,7 +318,7 @@ router.post("/", async (req, res) => {
           errorMessage
         );
         return res.status(400).json({
-          error: "IRN Regeneration Failed - Enhanced Authentication API Error",
+          error: "Credit Note IRN Generation Failed - Enhanced Authentication API Error",
           details: errorMessage,
           apiResponse: {
             status: enhancedAuthResponse.status,
@@ -247,7 +340,7 @@ router.post("/", async (req, res) => {
           enhancedAuthData.ErrorMessage || enhancedAuthData.Message
         );
         return res.status(400).json({
-          error: "IRN Regeneration Failed - Enhanced Authentication Error",
+          error: "Credit Note IRN Generation Failed - Enhanced Authentication Error",
           details:
             enhancedAuthData.ErrorMessage ||
             enhancedAuthData.Message ||
@@ -271,9 +364,9 @@ router.post("/", async (req, res) => {
       console.log(`[${requestId}] Step 2: Using cached auth data`);
     }
 
-    // Step 3: Generate IRN
+    // Step 3: Generate IRN for credit note
     console.log(
-      `[${requestId}] Step 3: Generating IRN for invoice ${invoice.invoice_no}...`
+      `[${requestId}] Step 3: Generating IRN for credit note ${credit_note_no}...`
     );
     const irnResponse = await fetch(
       "https://staging.fynamics.co.in/api/einvoice/enhanced/generate-irn",
@@ -288,7 +381,7 @@ router.post("/", async (req, res) => {
           Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(invoiceData),
+        body: JSON.stringify(creditNoteData),
       }
     );
 
@@ -307,7 +400,7 @@ router.post("/", async (req, res) => {
 
       console.error(`[${requestId}] IRN API Error:`, errorMessage);
       return res.status(400).json({
-        error: "IRN Regeneration Failed - API Error",
+        error: "Credit Note IRN Generation Failed - API Error",
         details: errorMessage,
         apiResponse: {
           status: irnResponse.status,
@@ -317,7 +410,7 @@ router.post("/", async (req, res) => {
       });
     }
 
-    const irnData = await irnResponse.json();
+    irnData = await irnResponse.json();
     console.log(
       `[${requestId}] Step 3 - IRN generation response:`,
       irnData.Irn ? "Success" : "Failed"
@@ -328,9 +421,13 @@ router.post("/", async (req, res) => {
         status: irnData.Status,
         errorDetails: irnData.ErrorDetails,
         errorMessage: irnData.ErrorMessage,
+        errorCount: irnData.ErrorDetails ? irnData.ErrorDetails.length : 0,
       });
 
-      // Extract detailed error message
+      console.log(
+        `[${requestId}] IRN generation failed, but will continue to save credit note to database`
+      );
+
       let errorDetails = "IRN generation was unsuccessful";
       let errorCode = null;
 
@@ -375,8 +472,8 @@ router.post("/", async (req, res) => {
         errorDetails = irnData.message;
       }
 
-      return res.status(400).json({
-        error: "IRN Regeneration Failed",
+      irnError = {
+        error: "Credit Note IRN Generation Failed",
         details: errorDetails,
         errorCode: errorCode,
         apiResponse: {
@@ -384,56 +481,102 @@ router.post("/", async (req, res) => {
           errorCode: errorCode,
           timestamp: new Date().toISOString(),
         },
-      });
+      };
+
+      irnData = null;
+    } else {
+      console.log(`[${requestId}] IRN generated successfully:`, irnData.Irn);
     }
 
-    console.log(`[${requestId}] IRN generated successfully:`, irnData.Irn);
+    // STEP 2: Create credit note (with IRN data if generated)
+    const creditNoteInsertData = {
+      unit_id: unitId,
+      credit_note_no,
+      credit_note_date: body.credit_note_date,
+      invoice_no: invoiceNo,
+      original_invoice_date: invoice.invoice_date,
+      customer_id: customerId,
+      billing_address: body.billing_address,
+      delivery_address: body.delivery_address,
+      po_number: body.po_number || null,
+      grade: body.grade,
+      hsn_code: body.hsn_code,
+      original_quantity: Number(body.original_quantity),
+      original_rate: Number(body.original_rate),
+      original_gross_amount: Number(body.original_gross_amount),
+      original_taxable_amount: Number(body.original_taxable_amount),
+      adjusted_quantity: Number(body.adjusted_quantity),
+      adjusted_rate: Number(body.adjusted_rate),
+      adjusted_gross_amount: Number(body.adjusted_gross_amount),
+      adjusted_discount: Number(body.adjusted_discount || 0),
+      adjusted_taxable_amount: Number(body.adjusted_taxable_amount),
+      cgst: Number(body.cgst),
+      sgst: Number(body.sgst),
+      igst: Number(body.igst || 0),
+      gst_percentage: Number(body.gst_percentage || 18),
+      round_off: Number(body.round_off),
+      total: Number(body.total),
+      difference_quantity: Number(body.difference_quantity),
+      difference_amount: Number(body.difference_amount),
+      vehicle_no: body.vehicle_no || null,
+      dc_no: body.dc_no || null,
+      mode_of_transport: body.mode_of_transport || "Road",
+      reason_for_credit_note: body.reason_for_credit_note || "Price/Quantity Adjustment",
+      remarks: body.remarks || null,
+      credit_note_data: creditNoteData,
+      related_invoices: relatedInvoices,
+      ...(irnData &&
+        irnData.Irn && {
+          irn: irnData.Irn,
+          qrcode: irnData.SignedQRCode,
+          ack_no: irnData.AckNo,
+          ack_dt: irnData.AckDt ? new Date(irnData.AckDt) : null,
+          signed_invoice: irnData.SignedInvoice,
+          einvoice_status: "GENERATED",
+        }),
+    };
 
-    // Update invoice with IRN data
-    const { data: updatedInvoice, error: updateError } = await supabase
-      .from("invoices")
-      .update({
-        irn: irnData.Irn,
-        qrcode: irnData.SignedQRCode,
-        ack_no: irnData.AckNo,
-        ack_dt: irnData.AckDt ? new Date(irnData.AckDt) : null,
-        signed_invoice: irnData.SignedInvoice,
-        einvoice_status: "GENERATED",
-      })
-      .eq("id", invoice_id)
+    const { data: creditNoteResult, error: creditNoteError } = await supabase
+      .from("credit_notes")
+      .insert(creditNoteInsertData)
       .select("*")
       .single();
 
-    if (updateError) {
-      console.error(`[${requestId}] Failed to update invoice:`, updateError);
+    if (creditNoteError) {
+      console.error(
+        `[${requestId}] Failed to create credit note:`,
+        creditNoteError
+      );
       return res.status(500).json({
-        error: "Database Update Failed",
-        details: updateError.message,
-        irnGenerated: irnData.Irn,
-        warning: "IRN was generated but failed to save to database",
+        error: "Credit note creation failed",
+        details: creditNoteError.message,
       });
     }
 
+    console.log(
+      `[${requestId}] Credit note created successfully:`,
+      irnData ? "with IRN" : "without IRN"
+    );
+
     const duration = Date.now() - startTime;
     console.log(
-      `[${requestId}] IRN Regeneration Completed Successfully in ${duration}ms`
+      `[${requestId}] Generate Credit Note IRN Request Completed Successfully in ${duration}ms`
     );
 
     return res.json({
-      success: true,
-      message: "IRN regenerated successfully",
-      invoice: updatedInvoice,
-      Irn: updatedInvoice.irn,
-      SignedQRCode: updatedInvoice.qrcode,
-      AckNo: updatedInvoice.ack_no,
-      AckDt: updatedInvoice.ack_dt,
-      SignedInvoice: updatedInvoice.signed_invoice,
-      irn: {
-        irn: updatedInvoice.irn,
-        qrcode: updatedInvoice.qrcode,
-        ack_no: updatedInvoice.ack_no,
-        status: "GENERATED",
-      },
+      credit_note: creditNoteResult,
+      ...(irnData && {
+        irn: {
+          irn: creditNoteResult.irn,
+          qrcode: creditNoteResult.qrcode,
+          ack_no: creditNoteResult.ack_no,
+          status: "GENERATED",
+        },
+      }),
+      ...(irnError && {
+        irnError: irnError,
+        warning: "Credit note saved successfully but IRN generation failed",
+      }),
     });
   } catch (error) {
     const duration = Date.now() - startTime;
