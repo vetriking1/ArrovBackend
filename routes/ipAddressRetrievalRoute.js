@@ -10,7 +10,7 @@ router.get("/", async (req, res) => {
   try {
     console.log(`[${requestId}] Step 1: Authenticating with e-invoice API...`);
     const response = await fetch(
-      "https://staging.fynamics.co.in/api/authenticate",
+      "https://www.fynamics.co.in/api/authenticate",
       {
         method: "POST", // Using POST as required by the API
         headers: {

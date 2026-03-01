@@ -200,7 +200,7 @@ router.post("/", async (req, res) => {
           `[${requestId}] Step 1: Authenticating with e-invoice API (no cached token)...`
         );
         const authResponse = await fetch(
-          "https://staging.fynamics.co.in/api/authenticate",
+          "https://www.fynamics.co.in/api/authenticate",
           {
             method: "POST",
             headers: {
@@ -282,7 +282,7 @@ router.post("/", async (req, res) => {
         const forceRefresh = shouldForceRefresh();
 
         const enhancedAuthResponse = await fetch(
-          "https://staging.fynamics.co.in/api/einvoice/enhanced/authentication",
+          "https://www.fynamics.co.in/api/einvoice/enhanced/authentication",
           {
             method: "POST",
             headers: {
@@ -372,7 +372,7 @@ router.post("/", async (req, res) => {
         `[${requestId}] Step 3: Generating IRN for invoice ${invoice_no}...`
       );
       const irnResponse = await fetch(
-        "https://staging.fynamics.co.in/api/einvoice/enhanced/generate-irn",
+        "https://www.fynamics.co.in/api/einvoice/enhanced/generate-irn",
         {
           method: "POST",
           headers: {
