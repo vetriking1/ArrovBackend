@@ -226,7 +226,7 @@ router.get("/:gstin", async (req, res) => {
     );
 
     const searchTaxpayerResponse = await fetch(
-      `https://www.fynamics.co.in/api/gst/search-taxpayer/${gstin}`,
+      `https://www.fynamics.co.in/api/gst/search-taxpayer/action/gstin?gstin=${gstin}`,
       {
         method: "GET",
         headers: {
