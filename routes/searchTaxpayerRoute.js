@@ -226,14 +226,15 @@ router.get("/:gstin", async (req, res) => {
     );
 
     const searchTaxpayerResponse = await fetch(
-      `https://www.fynamics.co.in/api/gst/search-taxpayer/action/gstin?gstin=${gstin}`,
+      `https://www.fynamics.co.in/api/gst/search-taxpayer/action/TP?gstin=${gstin}`,
       {
         method: "GET",
         headers: {
           accept: "application/json",
           gstin: process.env.GSTIN,
           AuthToken: authData.authToken,
-          user_name: authData.userName,
+          username: authData.userName,
+          auth_token: authData.authToken,
           sek: authData.sek,
           Authorization: `Bearer ${accessToken}`,
         },
