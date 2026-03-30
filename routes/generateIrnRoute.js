@@ -142,9 +142,8 @@ router.post("/", async (req, res) => {
 
     // Determine if this is an inter-state transaction using GSTIN
     const customerStateCode = getStateCodeFromGSTIN(customer.gstin || "");
-    const unitStateCode = customer.gstin.substring(0, 2); // Default to Tamil Nadu (hardcoded for now)
-    const isInterState = customerStateCode !== unitStateCode;
-
+    const unitStateCode = customer.gstin?.substring(0, 2) || "33"; // Default to Tamil Nadu
+    const isInterState = customerStateCode !== unitStateCode; 
     // Generate invoice JSONB
     const invoiceData = generateInvoiceJSONB({
       invoiceNo: invoice_no,
