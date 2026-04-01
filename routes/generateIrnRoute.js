@@ -129,6 +129,7 @@ router.post("/", async (req, res) => {
       .from("grades")
       .select("id, product_description, is_service")
       .eq("grade", body.grade)
+      .eq("customer_id", customerId)
       .maybeSingle();
 
     if (gradeError || !gradeData) {
@@ -136,7 +137,9 @@ router.post("/", async (req, res) => {
         `[${requestId}] Grade not found:`,
         body.grade,
         "for customer:",
-        customerId
+        customerId,
+        "Error:",
+        gradeError?.message
       );
     }
 
@@ -433,12 +436,13 @@ router.post("/", async (req, res) => {
     );
 
     // Update order delivered_quantity and status if PO number is provided
-    if (body.po_number) {
+    if (body.po_number && gradeId) {
       console.log(
         `[${requestId}] Updating order delivered_quantity and status:`,
         {
           po_number: body.po_number,
           customer_id: customerId,
+          grade_id: gradeId,
           quantity: Number(body.quantity),
         }
       );
@@ -495,6 +499,10 @@ router.post("/", async (req, res) => {
           fetchError
         );
       }
+    } else if (body.po_number && !gradeId) {
+      console.warn(
+        `[${requestId}] Skipping order update: gradeId not found for grade "${body.grade}" and customer ${customerId}`
+      );
     }
 
     const duration = Date.now() - startTime;
