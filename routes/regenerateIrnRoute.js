@@ -3,13 +3,8 @@ import { createSupabaseServer } from "../config.js";
 import dotenv from "dotenv";
 dotenv.config();
 
-import {
-  getAccessToken,
-  setAccessToken,
-  shouldForceRefresh,
-  getAuthData,
-  setAuthData,
-} from "../lib/tokenCache.js";
+import { authenticateWithRetry } from "../lib/authHelper.js";
+import { isTokenError, clearAuthTokens } from "../lib/tokenCache.js";
 
 const router = Router();
 
@@ -101,229 +96,116 @@ router.post("/", async (req, res) => {
       invoice.invoice_no
     );
 
-    // Step 1: Get access token (with caching)
-    let accessToken = getAccessToken();
+    // Retry logic for token errors
+    let irnData = null;
+    let retryCount = 0;
+    const MAX_RETRIES = 1;
 
-    if (!accessToken) {
-      console.log(
-        `[${requestId}] Step 1: Authenticating with e-invoice API (no cached token)...`
-      );
-      const authResponse = await fetch(
-        "https://www.fynamics.co.in/api/authenticate",
-        {
-          method: "POST",
-          headers: {
-            accept: "application/json",
-            clientId: process.env.EINVOICE_CLIENT_ID,
-            clientSecret: process.env.EINVOICE_CLIENT_SECRET,
-          },
-        }
-      );
-
-      if (!authResponse.ok) {
-        const contentType = authResponse.headers.get("content-type");
-        let errorMessage = `HTTP ${authResponse.status}: ${authResponse.statusText}`;
-
-        if (contentType && contentType.includes("application/json")) {
-          const errorData = await authResponse.json();
-          errorMessage =
-            errorData.errorMessage || errorData.message || errorMessage;
-        } else {
-          const textResponse = await authResponse.text();
-          errorMessage = textResponse || errorMessage;
+    while (retryCount <= MAX_RETRIES) {
+      try {
+        // Step 1 & 2: Authenticate with retry
+        const authResult = await authenticateWithRetry(requestId, MAX_RETRIES - retryCount);
+        
+        if (!authResult.success) {
+          return res.status(400).json({
+            error: "IRN Regeneration Failed - " + authResult.error.error,
+            details: authResult.error.details,
+            apiResponse: authResult.error.apiResponse,
+          });
         }
 
-        console.error(`[${requestId}] Authentication API Error:`, errorMessage);
-        return res.status(400).json({
-          error: "IRN Regeneration Failed - Authentication API Error",
-          details: errorMessage,
-          apiResponse: {
-            status: authResponse.status,
-            statusText: authResponse.statusText,
-            timestamp: new Date().toISOString(),
-          },
-        });
-      }
+        const { accessToken, authData } = authResult;
 
-      const authApiData = await authResponse.json();
-      console.log(
-        `[${requestId}] Step 1 - Access token response:`,
-        authApiData.status
-      );
-
-      if (authApiData.status !== 1) {
-        console.error(
-          `[${requestId}] Authentication Failed:`,
-          authApiData.errorMessage || authApiData.message
+        // Step 3: Generate IRN
+        console.log(
+          `[${requestId}] Step 3: Generating IRN for invoice ${invoice.invoice_no}...`
         );
-        return res.status(400).json({
-          error: "IRN Regeneration Failed - Authentication Error",
-          details:
-            authApiData.errorMessage ||
-            authApiData.message ||
-            "Failed to get access token",
-          apiResponse: {
-            status: authApiData.status,
-            errorCode: authApiData.errorCode,
-            timestamp: new Date().toISOString(),
-          },
-        });
-      }
+        const irnResponse = await fetch(
+          "https://www.fynamics.co.in/api/einvoice/enhanced/generate-irn",
+          {
+            method: "POST",
+            headers: {
+              accept: "application/json",
+              gstin: process.env.GSTIN,
+              AuthToken: authData.authToken,
+              user_name: authData.userName,
+              sek: authData.sek,
+              Authorization: `Bearer ${accessToken}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(invoiceData),
+          }
+        );
 
-      accessToken = authApiData.data.accessToken;
-      setAccessToken(accessToken);
-      console.log(`[${requestId}] Access token cached successfully`);
-    } else {
-      console.log(`[${requestId}] Step 1: Using cached access token`);
+        if (!irnResponse.ok) {
+          const contentType = irnResponse.headers.get("content-type");
+          let errorMessage = `HTTP ${irnResponse.status}: ${irnResponse.statusText}`;
+
+          if (contentType && contentType.includes("application/json")) {
+            const errorData = await irnResponse.json();
+            errorMessage =
+              errorData.ErrorMessage || errorData.message || errorMessage;
+
+            // Check if it's a token error and retry
+            if (isTokenError(errorData) && retryCount < MAX_RETRIES) {
+              console.log(
+                `[${requestId}] Token error in IRN generation, clearing auth tokens and retrying (attempt ${retryCount + 1}/${MAX_RETRIES})...`
+              );
+              clearAuthTokens();
+              retryCount++;
+              continue;
+            }
+          } else {
+            const textResponse = await irnResponse.text();
+            errorMessage = textResponse || errorMessage;
+          }
+
+          console.error(`[${requestId}] IRN API Error:`, errorMessage);
+          return res.status(400).json({
+            error: "IRN Regeneration Failed - API Error",
+            details: errorMessage,
+            apiResponse: {
+              status: irnResponse.status,
+              statusText: irnResponse.statusText,
+              timestamp: new Date().toISOString(),
+            },
+          });
+        }
+
+        irnData = await irnResponse.json();
+        console.log(
+          `[${requestId}] Step 3 - IRN generation response:`,
+          irnData.Irn ? "Success" : "Failed"
+        );
+
+        // Check if IRN response indicates token error
+        if (!irnData.Irn && isTokenError(irnData) && retryCount < MAX_RETRIES) {
+          console.log(
+            `[${requestId}] Token error in IRN response (ErrorCode: ${irnData.ErrorDetails?.[0]?.ErrorCode}), clearing auth tokens and retrying (attempt ${retryCount + 1}/${MAX_RETRIES})...`
+          );
+          clearAuthTokens();
+          retryCount++;
+          continue;
+        }
+
+        // Success or non-token error - break the retry loop
+        break;
+      } catch (error) {
+        console.error(
+          `[${requestId}] Exception during IRN generation:`,
+          error
+        );
+        if (retryCount < MAX_RETRIES) {
+          console.log(`[${requestId}] Retrying after exception (attempt ${retryCount + 1}/${MAX_RETRIES})...`);
+          clearAuthTokens();
+          retryCount++;
+          continue;
+        }
+        throw error;
+      }
     }
 
-    // Step 2: Enhanced authentication (with caching)
-    let authData = getAuthData();
-
-    if (!authData) {
-      console.log(
-        `[${requestId}] Step 2: Enhanced authentication (no cached auth)...`
-      );
-      const forceRefresh = shouldForceRefresh();
-
-      const enhancedAuthResponse = await fetch(
-        "https://www.fynamics.co.in/api/einvoice/enhanced/authentication",
-        {
-          method: "POST",
-          headers: {
-            accept: "application/json",
-            gstin: process.env.GSTIN,
-            Authorization: `Bearer ${accessToken}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            Username: process.env.EINVOICE_USERNAME,
-            Password: process.env.EINVOICE_PASSWORD,
-            ForceRefreshAccessToken: forceRefresh,
-          }),
-        }
-      );
-
-      if (!enhancedAuthResponse.ok) {
-        const contentType = enhancedAuthResponse.headers.get("content-type");
-        let errorMessage = `HTTP ${enhancedAuthResponse.status}: ${enhancedAuthResponse.statusText}`;
-
-        if (contentType && contentType.includes("application/json")) {
-          const errorData = await enhancedAuthResponse.json();
-          errorMessage =
-            errorData.ErrorMessage ||
-            errorData.Message ||
-            errorData.message ||
-            errorMessage;
-        } else {
-          const textResponse = await enhancedAuthResponse.text();
-          errorMessage = textResponse || errorMessage;
-        }
-
-        console.error(
-          `[${requestId}] Enhanced Authentication API Error:`,
-          errorMessage
-        );
-        return res.status(400).json({
-          error: "IRN Regeneration Failed - Enhanced Authentication API Error",
-          details: errorMessage,
-          apiResponse: {
-            status: enhancedAuthResponse.status,
-            statusText: enhancedAuthResponse.statusText,
-            timestamp: new Date().toISOString(),
-          },
-        });
-      }
-
-      const enhancedAuthData = await enhancedAuthResponse.json();
-      console.log(
-        `[${requestId}] Step 2 - Enhanced auth response:`,
-        enhancedAuthData.Status
-      );
-
-      if (enhancedAuthData.Status !== 1) {
-        console.error(
-          `[${requestId}] Enhanced Authentication Failed:`,
-          enhancedAuthData.ErrorMessage || enhancedAuthData.Message
-        );
-        return res.status(400).json({
-          error: "IRN Regeneration Failed - Enhanced Authentication Error",
-          details:
-            enhancedAuthData.ErrorMessage ||
-            enhancedAuthData.Message ||
-            "Enhanced authentication failed",
-          apiResponse: {
-            status: enhancedAuthData.Status,
-            errorCode: enhancedAuthData.ErrorCode,
-            timestamp: new Date().toISOString(),
-          },
-        });
-      }
-
-      authData = {
-        authToken: enhancedAuthData.Data.AuthToken,
-        sek: enhancedAuthData.Data.Sek,
-        userName: enhancedAuthData.Data.UserName,
-      };
-      setAuthData(authData.authToken, authData.sek, authData.userName);
-      console.log(`[${requestId}] Auth data cached successfully`);
-    } else {
-      console.log(`[${requestId}] Step 2: Using cached auth data`);
-    }
-
-    // Step 3: Generate IRN
-    console.log(
-      `[${requestId}] Step 3: Generating IRN for invoice ${invoice.invoice_no}...`
-    );
-    const irnResponse = await fetch(
-      "https://www.fynamics.co.in/api/einvoice/enhanced/generate-irn",
-      {
-        method: "POST",
-        headers: {
-          accept: "application/json",
-          gstin: process.env.GSTIN,
-          AuthToken: authData.authToken,
-          user_name: authData.userName,
-          sek: authData.sek,
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(invoiceData),
-      }
-    );
-
-    if (!irnResponse.ok) {
-      const contentType = irnResponse.headers.get("content-type");
-      let errorMessage = `HTTP ${irnResponse.status}: ${irnResponse.statusText}`;
-
-      if (contentType && contentType.includes("application/json")) {
-        const errorData = await irnResponse.json();
-        errorMessage =
-          errorData.ErrorMessage || errorData.message || errorMessage;
-      } else {
-        const textResponse = await irnResponse.text();
-        errorMessage = textResponse || errorMessage;
-      }
-
-      console.error(`[${requestId}] IRN API Error:`, errorMessage);
-      return res.status(400).json({
-        error: "IRN Regeneration Failed - API Error",
-        details: errorMessage,
-        apiResponse: {
-          status: irnResponse.status,
-          statusText: irnResponse.statusText,
-          timestamp: new Date().toISOString(),
-        },
-      });
-    }
-
-    const irnData = await irnResponse.json();
-    console.log(
-      `[${requestId}] Step 3 - IRN generation response:`,
-      irnData.Irn ? "Success" : "Failed"
-    );
-
-    if (!irnData.Irn) {
+    if (!irnData || !irnData.Irn) {
       console.error(`[${requestId}] IRN Generation Failed:`, {
         status: irnData.Status,
         errorDetails: irnData.ErrorDetails,
