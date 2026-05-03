@@ -3,7 +3,6 @@ import { createSupabaseServer } from "../config.js";
 import dotenv from "dotenv";
 dotenv.config();
 
-import { generateInvoiceJSONB, getStateCodeFromGSTIN } from "../lib/invoice.js";
 import { authenticateWithRetry } from "../lib/authHelper.js";
 import { isTokenError, clearAuthTokens } from "../lib/tokenCache.js";
 
@@ -47,20 +46,19 @@ router.post("/", async (req, res) => {
 
     const unitId = Number(body.unit_id);
     const customerId = Number(body.customer_id);
-    const billingAddressId = body.billing_address_id
-      ? Number(body.billing_address_id)
-      : null;
-    const deliveryAddressId = body.delivery_address_id
-      ? Number(body.delivery_address_id)
-      : null;
+
+    // Validate that invoice_data was provided by the frontend
+    if (!body.invoice_data) {
+      return res.status(400).json({
+        error: "Validation Error",
+        details: "invoice_data is required — must be generated on the frontend",
+      });
+    }
 
     console.log(`[${requestId}] Invoice creation request:`, {
       unitId,
       customerId,
-      billingAddressId,
-      deliveryAddressId,
-      hasCustomerId: !!customerId,
-      customerIdType: typeof customerId,
+      hasInvoiceData: true,
     });
 
     // Generate invoice number
@@ -74,147 +72,34 @@ router.post("/", async (req, res) => {
     }
     const invoice_no = rpcData;
 
-    // Fetch customer data with enhanced fields
-    const { data: customer, error: customerError } = await supabase
-      .from("customers")
-      .select("name, gstin, trade_name, type")
-      .eq("id", customerId)
-      .single();
+    // Patch the invoice number into the frontend-provided invoice_data
+    // Frontend sends "PENDING" as placeholder; we replace it with the real invoice number
+    const invoiceData = {
+      ...body.invoice_data,
+      DocDtls: {
+        ...body.invoice_data.DocDtls,
+        No: invoice_no,
+      },
+    };
 
-    console.log(`[${requestId}] Customer query result:`, {
-      customerId,
-      found: !!customer,
-      error: customerError?.message,
-      customer: customer
-        ? { name: customer.name, gstin: customer.gstin }
-        : null,
-    });
+    console.log(`[${requestId}] Invoice number generated:`, invoice_no);
 
-    if (customerError || !customer) {
-      console.error(`[${requestId}] Customer not found:`, {
-        customerId,
-        error: customerError,
-      });
-      return res.status(404).json({ error: "Customer not found" });
+    // Fetch grade ID for order update (only field still needed from DB)
+    let gradeId = null;
+    if (body.po_number && body.grade) {
+      const { data: gradeRows } = await supabase
+        .from("grades")
+        .select("id, customer_id")
+        .eq("grade", body.grade)
+        .or(`customer_id.eq.${customerId},customer_id.is.null`);
+
+      const gradeData =
+        gradeRows?.find((g) => g.customer_id === customerId) ||
+        gradeRows?.find((g) => g.customer_id === null) ||
+        null;
+
+      gradeId = gradeData?.id || null;
     }
-
-    // Fetch billing address from billing_addresses table
-    let billingAddressText = body.billing_address;
-    let customerLoc = null;
-    let customerPin = null;
-
-    if (billingAddressId) {
-      const { data: billingAddr, error: billingError } = await supabase
-        .from("billing_addresses")
-        .select("address, loc, pin")
-        .eq("id", billingAddressId)
-        .eq("customer_id", customerId)
-        .single();
-
-      if (!billingError && billingAddr) {
-        billingAddressText = billingAddr.address;
-        customerLoc = billingAddr.loc;
-        customerPin = billingAddr.pin;
-      }
-    }
-
-    // Fetch delivery address if provided
-    let deliveryAddress = body.delivery_address;
-    let deliveryLoc = null;
-    let deliveryPin = null;
-    if (deliveryAddressId) {
-      const { data: deliveryAddr, error: deliveryError } = await supabase
-        .from("delivery_addresses")
-        .select("address, loc, pin")
-        .eq("id", deliveryAddressId)
-        .single();
-
-      if (!deliveryError && deliveryAddr) {
-        deliveryAddress = deliveryAddr.address;
-        deliveryLoc = deliveryAddr.loc;
-        deliveryPin = deliveryAddr.pin;
-      }
-    }
-
-    // Fetch unit data with enhanced fields
-    const { data: unit, error: unitError } = await supabase
-      .from("units")
-      .select("address, loc, pincode")
-      .eq("id", unitId)
-      .single();
-
-    if (unitError || !unit) {
-      return res.status(404).json({ error: "Unit not found" });
-    }
-
-    // Fetch grade data: prefer customer-specific, fall back to default (customer_id IS NULL)
-    const { data: gradeRows, error: gradeError } = await supabase
-      .from("grades")
-      .select("id, product_description, is_service, customer_id")
-      .eq("grade", body.grade)
-      .or(`customer_id.eq.${customerId},customer_id.is.null`);
-
-    const gradeData =
-      gradeRows?.find((g) => g.customer_id === customerId) ||
-      gradeRows?.find((g) => g.customer_id === null) ||
-      null;
-
-    if (gradeError || !gradeData) {
-      console.error(
-        `[${requestId}] Grade not found:`,
-        body.grade,
-        "for customer:",
-        customerId,
-        "Error:",
-        gradeError?.message
-      );
-    }
-
-    const productDesc =
-      gradeData?.product_description || `Ready-Mix Concrete – ${body.grade}`;
-    const isServc = gradeData?.is_service ?? "N";
-    const gradeId = gradeData?.id;
-
-    // Determine if this is an inter-state transaction using GSTIN
-    const customerStateCode = getStateCodeFromGSTIN(customer.gstin || "");
-    const unitStateCode = customer.gstin?.substring(0, 2) || "33"; // Default to Tamil Nadu
-    const isInterState = customerStateCode !== unitStateCode;
-    // Generate invoice JSONB
-    const invoiceData = generateInvoiceJSONB({
-      invoiceNo: invoice_no,
-      invoiceDate: new Date(body.invoice_date),
-      customerGstin: customer.gstin || "",
-      customerName: customer.name,
-      customerTradeName: customer.trade_name,
-      customerType: customer.type || "B2B",
-      billingAddress: billingAddressText,
-      customerLoc: customerLoc,
-      customerPin: customerPin,
-      customerStateCode: customerStateCode,
-      deliveryAddress: deliveryAddress,
-      deliveryLoc: deliveryLoc,
-      deliveryPin: deliveryPin,
-      unitAddress: unit.address,
-      unitLoc: unit.loc,
-      unitPincode: unit.pincode,
-      unitStateCode: unitStateCode,
-      grade: body.grade,
-      productDesc: productDesc,
-      isServc: isServc,
-      hsnCode: body.hsn_code,
-      quantity: Number(body.quantity),
-      rate: Number(body.rate),
-      grossAmount: Number(body.gross_amount),
-      discount: Number(body.discount || 0),
-      taxableAmount: Number(body.taxable_amount),
-      cgst: Number(body.cgst),
-      sgst: Number(body.sgst),
-      igst: Number(body.igst || 0),
-      roundOff: Number(body.round_off),
-      total: Number(body.total),
-      isInterState: isInterState,
-      gstPercentage: Number(body.gst_percentage || 18),
-    });
 
     // STEP 1: Generate IRN first before creating invoice (skip for NON BILLING)
     let irnData = null;
@@ -234,7 +119,7 @@ router.post("/", async (req, res) => {
         try {
           // Step 1 & 2: Authenticate with retry
           const authResult = await authenticateWithRetry(requestId, MAX_RETRIES - retryCount);
-          
+
           if (!authResult.success) {
             return res.status(400).json({
               error: "IRN Generation Failed - " + authResult.error.error,
@@ -245,7 +130,7 @@ router.post("/", async (req, res) => {
 
           const { accessToken, authData } = authResult;
 
-          // Step 3: Generate IRN
+          // Step 3: Generate IRN using the frontend-built (and invoice-number-patched) invoice data
           console.log(
             `[${requestId}] Step 3: Generating IRN for invoice ${invoice_no}...`
           );
@@ -423,16 +308,17 @@ router.post("/", async (req, res) => {
     }
 
     // STEP 2: Create invoice (with IRN data if generated)
-    const { delivery_address_id, billing_address_id, ...invoiceBody } = body;
+    // Strip address IDs and invoice_data from body — we handle them explicitly
+    const { delivery_address_id, billing_address_id, invoice_data: _invoiceDataFromBody, ...invoiceBody } = body;
 
     const invoiceInsertData = {
       ...invoiceBody,
       unit_id: unitId,
       invoice_no,
-      billing_address: billingAddressText,
+      billing_address: body.billing_address,
       discount: Number(body.discount || 0),
       gst_percentage: Number(body.gst_percentage || 18),
-      invoice_data: invoiceData,
+      invoice_data: invoiceData, // Use the patched invoice data (with real invoice number)
       ...(irnData &&
         irnData.Irn && {
           irn: irnData.Irn,
