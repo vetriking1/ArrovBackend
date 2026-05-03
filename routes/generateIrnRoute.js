@@ -47,6 +47,9 @@ router.post("/", async (req, res) => {
 
     const unitId = Number(body.unit_id);
     const customerId = Number(body.customer_id);
+    const billingAddressId = body.billing_address_id
+      ? Number(body.billing_address_id)
+      : null;
     const deliveryAddressId = body.delivery_address_id
       ? Number(body.delivery_address_id)
       : null;
@@ -54,6 +57,7 @@ router.post("/", async (req, res) => {
     console.log(`[${requestId}] Invoice creation request:`, {
       unitId,
       customerId,
+      billingAddressId,
       deliveryAddressId,
       hasCustomerId: !!customerId,
       customerIdType: typeof customerId,
@@ -73,7 +77,7 @@ router.post("/", async (req, res) => {
     // Fetch customer data with enhanced fields
     const { data: customer, error: customerError } = await supabase
       .from("customers")
-      .select("name, gstin, trade_name, loc, pin, type")
+      .select("name, gstin, trade_name, type")
       .eq("id", customerId)
       .single();
 
@@ -94,11 +98,30 @@ router.post("/", async (req, res) => {
       return res.status(404).json({ error: "Customer not found" });
     }
 
+    // Fetch billing address from billing_addresses table
+    let billingAddressText = body.billing_address;
+    let customerLoc = null;
+    let customerPin = null;
+
+    if (billingAddressId) {
+      const { data: billingAddr, error: billingError } = await supabase
+        .from("billing_addresses")
+        .select("address, loc, pin")
+        .eq("id", billingAddressId)
+        .eq("customer_id", customerId)
+        .single();
+
+      if (!billingError && billingAddr) {
+        billingAddressText = billingAddr.address;
+        customerLoc = billingAddr.loc;
+        customerPin = billingAddr.pin;
+      }
+    }
+
     // Fetch delivery address if provided
     let deliveryAddress = body.delivery_address;
     let deliveryLoc = null;
     let deliveryPin = null;
-
     if (deliveryAddressId) {
       const { data: deliveryAddr, error: deliveryError } = await supabase
         .from("delivery_addresses")
@@ -124,13 +147,17 @@ router.post("/", async (req, res) => {
       return res.status(404).json({ error: "Unit not found" });
     }
 
-    // Fetch grade data with product description and service flag
-    const { data: gradeData, error: gradeError } = await supabase
+    // Fetch grade data: prefer customer-specific, fall back to default (customer_id IS NULL)
+    const { data: gradeRows, error: gradeError } = await supabase
       .from("grades")
-      .select("id, product_description, is_service")
+      .select("id, product_description, is_service, customer_id")
       .eq("grade", body.grade)
-      .eq("customer_id", customerId)
-      .maybeSingle();
+      .or(`customer_id.eq.${customerId},customer_id.is.null`);
+
+    const gradeData =
+      gradeRows?.find((g) => g.customer_id === customerId) ||
+      gradeRows?.find((g) => g.customer_id === null) ||
+      null;
 
     if (gradeError || !gradeData) {
       console.error(
@@ -145,7 +172,7 @@ router.post("/", async (req, res) => {
 
     const productDesc =
       gradeData?.product_description || `Ready-Mix Concrete – ${body.grade}`;
-    const isServc = gradeData?.is_service || "N";
+    const isServc = gradeData?.is_service ?? "N";
     const gradeId = gradeData?.id;
 
     // Determine if this is an inter-state transaction using GSTIN
@@ -160,9 +187,9 @@ router.post("/", async (req, res) => {
       customerName: customer.name,
       customerTradeName: customer.trade_name,
       customerType: customer.type || "B2B",
-      billingAddress: body.billing_address,
-      customerLoc: customer.loc,
-      customerPin: customer.pin,
+      billingAddress: billingAddressText,
+      customerLoc: customerLoc,
+      customerPin: customerPin,
       customerStateCode: customerStateCode,
       deliveryAddress: deliveryAddress,
       deliveryLoc: deliveryLoc,
@@ -396,12 +423,13 @@ router.post("/", async (req, res) => {
     }
 
     // STEP 2: Create invoice (with IRN data if generated)
-    const { delivery_address_id, ...invoiceBody } = body;
+    const { delivery_address_id, billing_address_id, ...invoiceBody } = body;
 
     const invoiceInsertData = {
       ...invoiceBody,
       unit_id: unitId,
       invoice_no,
+      billing_address: billingAddressText,
       discount: Number(body.discount || 0),
       gst_percentage: Number(body.gst_percentage || 18),
       invoice_data: invoiceData,

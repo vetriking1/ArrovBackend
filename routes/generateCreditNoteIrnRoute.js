@@ -54,6 +54,9 @@ router.post("/", async (req, res) => {
     const customerId = Number(body.customer_id);
     const invoiceNo = body.invoice_no;
     const relatedInvoices = body.related_invoices || [];
+    const billingAddressId = body.billing_address_id
+      ? Number(body.billing_address_id)
+      : null;
 
     console.log(`[${requestId}] Credit note creation request:`, {
       unitId,
@@ -93,7 +96,7 @@ router.post("/", async (req, res) => {
     // Fetch customer data with enhanced fields
     const { data: customer, error: customerError } = await supabase
       .from("customers")
-      .select("name, gstin, trade_name, loc, pin, type")
+      .select("name, gstin, trade_name, type")
       .eq("id", customerId)
       .single();
 
@@ -125,9 +128,28 @@ router.post("/", async (req, res) => {
       return res.status(404).json({ error: "Unit not found" });
     }
 
+    // Fetch billing address from billing_addresses table
+    let billingAddressText = body.billing_address;
+    let customerLoc = null;
+    let customerPin = null;
+
+    if (billingAddressId) {
+      const { data: billingAddr, error: billingError } = await supabase
+        .from("billing_addresses")
+        .select("address, loc, pin")
+        .eq("id", billingAddressId)
+        .eq("customer_id", customerId)
+        .single();
+
+      if (!billingError && billingAddr) {
+        billingAddressText = billingAddr.address;
+        customerLoc = billingAddr.loc;
+        customerPin = billingAddr.pin;
+      }
+    }
+
     // Fetch grade data with product description and service flag
-    const { data: gradeData, error: gradeError } = await supabase
-      .from("grades")
+    const { data: gradeData, error: gradeError } = await supabase      .from("grades")
       .select("product_description, is_service")
       .eq("grade", body.grade)
       .maybeSingle();
@@ -153,9 +175,9 @@ router.post("/", async (req, res) => {
       customerName: customer.name,
       customerTradeName: customer.trade_name,
       customerType: customer.type || "B2B",
-      billingAddress: body.billing_address,
-      customerLoc: customer.loc,
-      customerPin: customer.pin,
+      billingAddress: billingAddressText,
+      customerLoc: customerLoc,
+      customerPin: customerPin,
       customerStateCode: customerStateCode,
       deliveryAddress: body.delivery_address,
       deliveryLoc: body.delivery_loc,
@@ -496,7 +518,7 @@ router.post("/", async (req, res) => {
       invoice_no: invoiceNo,
       original_invoice_date: invoice.invoice_date,
       customer_id: customerId,
-      billing_address: body.billing_address,
+      billing_address: billingAddressText,
       delivery_address: body.delivery_address,
       po_number: body.po_number || null,
       grade: body.grade,

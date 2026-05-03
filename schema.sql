@@ -9,6 +9,17 @@ CREATE TABLE public.app_settings (
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT app_settings_pkey PRIMARY KEY (id)
 );
+CREATE TABLE public.billing_addresses (
+  id integer NOT NULL DEFAULT nextval('billing_addresses_id_seq'::regclass),
+  customer_id integer NOT NULL,
+  address text NOT NULL,
+  loc text,
+  pin text,
+  is_default boolean DEFAULT false,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT billing_addresses_pkey PRIMARY KEY (id),
+  CONSTRAINT billing_addresses_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id)
+);
 CREATE TABLE public.canceled_credit_notes (
   id integer GENERATED ALWAYS AS IDENTITY NOT NULL,
   credit_note_no text NOT NULL,
@@ -86,15 +97,12 @@ CREATE TABLE public.customers (
   id integer NOT NULL DEFAULT nextval('customers_id_seq'::regclass),
   name text NOT NULL,
   gstin text,
-  billing_addresses jsonb,
-  delivery_addresses jsonb,
   created_at timestamp with time zone DEFAULT now(),
   unit_id integer,
   type text DEFAULT 'B2B'::text CHECK (type = ANY (ARRAY['B2B'::text, 'B2C'::text])),
   trade_name text,
-  loc text,
-  pin text,
   pan_number text,
+  ledger_name text,
   CONSTRAINT customers_pkey PRIMARY KEY (id),
   CONSTRAINT customers_unit_id_fkey FOREIGN KEY (unit_id) REFERENCES public.units(id)
 );
@@ -185,6 +193,8 @@ CREATE TABLE public.invoices (
   is_cancelled boolean DEFAULT false,
   gst_percentage numeric NOT NULL DEFAULT 18.00,
   delivery_number text,
+  batch_report_start_time timestamp with time zone,
+  batch_report_end_time timestamp with time zone,
   CONSTRAINT invoices_pkey PRIMARY KEY (id),
   CONSTRAINT invoices_unit_id_fkey FOREIGN KEY (unit_id) REFERENCES public.units(id),
   CONSTRAINT invoices_created_by_fkey FOREIGN KEY (created_by) REFERENCES auth.users(id),
