@@ -10,6 +10,7 @@ import regenerateCreditNoteIrnRoute from "./routes/regenerateCreditNoteIrnRoute.
 import getIpRoute from "./routes/ipAddressRetrievalRoute.js";
 import searchTaxpayerRoute from "./routes/searchTaxpayerRoute.js";
 import getIrnByDocRoute from "./routes/getIrnByDocRoute.js";
+import getServerTimeRoute from "./routes/getServerTimeRoute.js";
 
 const app = express();
 
@@ -39,6 +40,7 @@ app.use("/api/regenerateCreditNoteIrn", regenerateCreditNoteIrnRoute);
 app.use("/api/checkIp", getIpRoute);
 app.use("/api/searchTaxpayer", searchTaxpayerRoute);
 app.use("/api/getIrnByDoc", getIrnByDocRoute);
+app.use("/api/getServerTime", getServerTimeRoute);
 
 app.get("/", (req, res) => {
   res.send("This is Invoice Server");
