@@ -3,7 +3,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 import { getOrRefreshAccessToken } from "../lib/authHelper.js";
-import { clearAccessToken } from "../lib/tokenCache.js";
+import { clearTokenCache } from "../lib/tokenCache.js";
 import { decryptSek, decryptGstr2bData } from "../lib/gstCrypto.js";
 import {
   setPendingAppKey,
@@ -90,7 +90,7 @@ async function triggerOtpRequest(requestId, cfg) {
   });
 
   if (resp.status === 401) {
-    clearAccessToken();
+    clearTokenCache();
   }
 
   const data = await resp.json().catch(() => ({}));
@@ -206,7 +206,7 @@ async function fetchAndDecryptGstr2b(requestId, cfg, session, rtnprd, fileNum) {
   });
 
   if (resp.status === 401) {
-    clearAccessToken();
+    clearTokenCache();
   }
 
   const payload = await resp.json().catch(() => ({}));
