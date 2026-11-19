@@ -23,6 +23,7 @@ const allowedOrigins = [
   "http://localhost:3000",
   "https://aarov.vercel.app",
   "https://erp.aarovbuildmart.in",
+  "https://tally.aarovbuildmart.in",
   "http://10.57.35.3:3000",
 ];
 
