@@ -21,6 +21,7 @@ app.use(express.urlencoded({ extended: true }));
 
 const allowedOrigins = [
   "http://localhost:3000",
+  "http://localhost:8080",
   "https://aarov.vercel.app",
   "https://erp.aarovbuildmart.in",
   "https://tally.aarovbuildmart.in",
