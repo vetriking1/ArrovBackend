@@ -23,6 +23,9 @@ function getGstConfig(req) {
   const gstin = process.env.GSTIN;
   const username = process.env.GST_USERNAME;
   const stateCd = process.env.GST_STATE_CD || (gstin ? gstin.slice(0, 2) : "");
+  const clientId = process.env.GST_CLIENT_ID || process.env.EINVOICE_CLIENT_ID;
+  const clientSecret =
+    process.env.GST_CLIENT_SECRET || process.env.EINVOICE_CLIENT_SECRET;
   const ipUsr =
     process.env.GST_IP_USR ||
     (req.headers["x-forwarded-for"] || "").split(",")[0].trim() ||
@@ -33,17 +36,40 @@ function getGstConfig(req) {
   if (!gstin) missing.push("GSTIN");
   if (!username) missing.push("GST_USERNAME");
   if (!stateCd) missing.push("GST_STATE_CD");
-  if (!process.env.EINVOICE_CLIENT_ID) missing.push("EINVOICE_CLIENT_ID");
-  if (!process.env.EINVOICE_CLIENT_SECRET) missing.push("EINVOICE_CLIENT_SECRET");
+  if (!clientId) missing.push("GST_CLIENT_ID or EINVOICE_CLIENT_ID");
+  if (!clientSecret) missing.push("GST_CLIENT_SECRET or EINVOICE_CLIENT_SECRET");
 
-  return { gstin, username, stateCd, ipUsr, missing };
+  return { gstin, username, stateCd, ipUsr, clientId, clientSecret, missing };
 }
 
 function makeRequestId(prefix = "GSTR2B") {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 }
 
-async function getBearerToken(requestId) {
+async function getBearerToken(requestId, cfg) {
+  // If separate GST_CLIENT_ID/SECRET are provided, authenticate directly with them
+  if (process.env.GST_CLIENT_ID && process.env.GST_CLIENT_SECRET) {
+    const resp = await fetch(`${FYNAMICS_BASE}/authenticate`, {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        clientId: cfg.clientId,
+        clientSecret: cfg.clientSecret,
+      },
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data.status !== 1 || !data.data?.accessToken) {
+      return {
+        ok: false,
+        error: {
+          error: "GST Authentication Failed",
+          details: data.errorMessage || data.message || `HTTP ${resp.status}`,
+        },
+      };
+    }
+    return { ok: true, accessToken: data.data.accessToken };
+  }
+
   const res = await getOrRefreshAccessToken(requestId);
   if (!res.success) {
     return { ok: false, error: res.error };
@@ -68,7 +94,7 @@ function isGstAuthFailure(payload) {
 }
 
 async function triggerOtpRequest(requestId, cfg) {
-  const tokenRes = await getBearerToken(requestId);
+  const tokenRes = await getBearerToken(requestId, cfg);
   if (!tokenRes.ok) {
     return { ok: false, status: 502, error: tokenRes.error };
   }
@@ -80,6 +106,8 @@ async function triggerOtpRequest(requestId, cfg) {
       accept: "application/json",
       "Content-Type": "application/json",
       Authorization: `Bearer ${tokenRes.accessToken}`,
+      clientid: cfg.clientId,
+      gstin: cfg.gstin,
       "ip-usr": cfg.ipUsr,
       "state-cd": cfg.stateCd,
     },
@@ -113,7 +141,7 @@ async function triggerOtpRequest(requestId, cfg) {
 }
 
 async function refreshGstSession(requestId, cfg, session) {
-  const tokenRes = await getBearerToken(requestId);
+  const tokenRes = await getBearerToken(requestId, cfg);
   if (!tokenRes.ok) return { ok: false };
 
   console.log(`[${requestId}] Lazy-refreshing GST auth_token for ${cfg.username}...`);
@@ -123,6 +151,8 @@ async function refreshGstSession(requestId, cfg, session) {
       accept: "application/json",
       "Content-Type": "application/json",
       Authorization: `Bearer ${tokenRes.accessToken}`,
+      clientid: cfg.clientId,
+      gstin: cfg.gstin,
       "ip-usr": cfg.ipUsr,
       "state-cd": cfg.stateCd,
       sek: session.sek,
@@ -181,7 +211,7 @@ async function ensureValidGstSession(requestId, cfg) {
 }
 
 async function fetchAndDecryptGstr2b(requestId, cfg, session, rtnprd, fileNum) {
-  const tokenRes = await getBearerToken(requestId);
+  const tokenRes = await getBearerToken(requestId, cfg);
   if (!tokenRes.ok) {
     return { ok: false, status: 502, body: tokenRes.error };
   }
@@ -196,6 +226,7 @@ async function fetchAndDecryptGstr2b(requestId, cfg, session, rtnprd, fileNum) {
     headers: {
       accept: "application/json",
       Authorization: `Bearer ${tokenRes.accessToken}`,
+      clientid: cfg.clientId,
       "ip-usr": cfg.ipUsr,
       "state-cd": cfg.stateCd,
       username: cfg.username,
@@ -342,7 +373,7 @@ router.post("/auth/verify-otp", async (req, res) => {
   }
 
   try {
-    const tokenRes = await getBearerToken(requestId);
+    const tokenRes = await getBearerToken(requestId, cfg);
     if (!tokenRes.ok) {
       return res.status(502).json(tokenRes.error);
     }
@@ -353,6 +384,8 @@ router.post("/auth/verify-otp", async (req, res) => {
         accept: "application/json",
         "Content-Type": "application/json",
         Authorization: `Bearer ${tokenRes.accessToken}`,
+        clientid: cfg.clientId,
+        gstin: cfg.gstin,
         "ip-usr": cfg.ipUsr,
         "state-cd": cfg.stateCd,
         app_key: appKey,
