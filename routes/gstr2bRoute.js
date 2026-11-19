@@ -37,13 +37,16 @@ function getGstConfig(req) {
   if (!username) missing.push("GST_USERNAME");
   if (!stateCd) missing.push("GST_STATE_CD");
   if (!clientId) missing.push("GST_CLIENT_ID or EINVOICE_CLIENT_ID");
-  if (!clientSecret) missing.push("GST_CLIENT_SECRET or EINVOICE_CLIENT_SECRET");
+  if (!clientSecret)
+    missing.push("GST_CLIENT_SECRET or EINVOICE_CLIENT_SECRET");
 
   return { gstin, username, stateCd, ipUsr, clientId, clientSecret, missing };
 }
 
 function makeRequestId(prefix = "GSTR2B") {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  return `${prefix}-${Date.now()}-${Math.random()
+    .toString(36)
+    .substring(2, 9)}`;
 }
 
 async function getBearerToken(requestId, cfg) {
@@ -99,7 +102,9 @@ async function triggerOtpRequest(requestId, cfg) {
     return { ok: false, status: 502, error: tokenRes.error };
   }
 
-  console.log(`[${requestId}] Triggering GST OTP request for ${cfg.username}...`);
+  console.log(
+    `[${requestId}] Triggering GST OTP request for ${cfg.username}...`
+  );
   const resp = await fetch(`${FYNAMICS_BASE}/gst/requestOTP`, {
     method: "POST",
     headers: {
@@ -121,14 +126,18 @@ async function triggerOtpRequest(requestId, cfg) {
   }
 
   const data = await resp.json().catch(() => ({}));
-  if (!resp.ok || (data.status_cd !== 1 && !data.app_key)) {
+  if (!resp.ok || String(data.status_cd) !== "1" || !data.app_key) {
     console.error(`[${requestId}] requestOTP failed:`, data);
     return {
       ok: false,
       status: resp.ok ? 400 : resp.status,
       error: {
         error: "GST OTP Request Failed",
-        details: data.error?.message || data.message || data.errorMessage || `HTTP ${resp.status}`,
+        details:
+          data.error?.message ||
+          data.message ||
+          data.errorMessage ||
+          `HTTP ${resp.status}`,
         apiResponse: data,
       },
     };
@@ -143,7 +152,9 @@ async function refreshGstSession(requestId, cfg, session) {
   const tokenRes = await getBearerToken(requestId, cfg);
   if (!tokenRes.ok) return { ok: false };
 
-  console.log(`[${requestId}] Lazy-refreshing GST auth_token for ${cfg.username}...`);
+  console.log(
+    `[${requestId}] Lazy-refreshing GST auth_token for ${cfg.username}...`
+  );
   const resp = await fetch(`${FYNAMICS_BASE}/gst/refreshtoken`, {
     method: "POST",
     headers: {
@@ -164,7 +175,7 @@ async function refreshGstSession(requestId, cfg, session) {
   });
 
   const data = await resp.json().catch(() => ({}));
-  if (!resp.ok || data.status_cd !== 1 || !data.auth_token || !data.sek) {
+  if (!resp.ok || String(data.status_cd) !== "1" || !data.auth_token || !data.sek) {
     console.warn(`[${requestId}] Refresh token failed:`, data);
     return { ok: false };
   }
@@ -180,7 +191,9 @@ async function refreshGstSession(requestId, cfg, session) {
     expiresAt: Date.now() + expiryMinutes * 60 * 1000,
   };
   setGstSession(cfg.gstin, updated);
-  console.log(`[${requestId}] GST session refreshed (expiry: ${expiryMinutes}m).`);
+  console.log(
+    `[${requestId}] GST session refreshed (expiry: ${expiryMinutes}m).`
+  );
   return { ok: true, session: updated };
 }
 
@@ -239,7 +252,7 @@ async function fetchAndDecryptGstr2b(requestId, cfg, session, rtnprd, fileNum) {
 
   const payload = await resp.json().catch(() => ({}));
 
-  if (!resp.ok || payload.status_cd === 0) {
+  if (!resp.ok || String(payload.status_cd) === "0") {
     if (isGstAuthFailure(payload)) {
       clearGstSession(cfg.gstin);
       const otpRes = await triggerOtpRequest(requestId, cfg);
@@ -252,7 +265,8 @@ async function fetchAndDecryptGstr2b(requestId, cfg, session, rtnprd, fileNum) {
         body: {
           success: false,
           otpRequired: true,
-          message: "GST session expired. A new OTP has been sent to the registered mobile/email.",
+          message:
+            "GST session expired. A new OTP has been sent to the registered mobile/email.",
         },
       };
     }
@@ -263,7 +277,11 @@ async function fetchAndDecryptGstr2b(requestId, cfg, session, rtnprd, fileNum) {
       body: {
         success: false,
         error: "GSTR-2B Fetch Failed",
-        details: payload.error?.message || payload.message || payload.errorMessage || `HTTP ${resp.status}`,
+        details:
+          payload.error?.message ||
+          payload.message ||
+          payload.errorMessage ||
+          `HTTP ${resp.status}`,
         apiResponse: payload,
       },
     };
@@ -360,7 +378,8 @@ router.post("/auth/verify-otp", async (req, res) => {
     });
   }
 
-  const appKey = getPendingAppKey(cfg.gstin) || getGstSession(cfg.gstin)?.appKey;
+  const appKey =
+    getPendingAppKey(cfg.gstin) || getGstSession(cfg.gstin)?.appKey;
   if (!appKey) {
     return res.status(400).json({
       success: false,
@@ -394,12 +413,16 @@ router.post("/auth/verify-otp", async (req, res) => {
     });
 
     const data = await resp.json().catch(() => ({}));
-    if (!resp.ok || data.status_cd !== 1 || !data.auth_token || !data.sek) {
+    if (!resp.ok || String(data.status_cd) !== "1" || !data.auth_token || !data.sek) {
       console.error(`[${requestId}] authtoken failed:`, data);
       return res.status(resp.ok ? 400 : resp.status).json({
         success: false,
         error: "OTP Verification Failed",
-        details: data.error?.message || data.message || data.errorMessage || "Invalid OTP",
+        details:
+          data.error?.message ||
+          data.message ||
+          data.errorMessage ||
+          "Invalid OTP",
         apiResponse: data,
       });
     }
@@ -415,7 +438,9 @@ router.post("/auth/verify-otp", async (req, res) => {
       expiresAt: Date.now() + expiryMinutes * 60 * 1000,
     };
     setGstSession(cfg.gstin, session);
-    console.log(`[${requestId}] GST session verified & cached (expiry: ${expiryMinutes}m).`);
+    console.log(
+      `[${requestId}] GST session verified & cached (expiry: ${expiryMinutes}m).`
+    );
 
     if (rtnprd) {
       if (!/^(0[1-9]|1[0-2])\d{4}$/.test(String(rtnprd))) {
@@ -425,7 +450,13 @@ router.post("/auth/verify-otp", async (req, res) => {
           details: "rtnprd must be in MMYYYY format (e.g. 102021)",
         });
       }
-      const result = await fetchAndDecryptGstr2b(requestId, cfg, session, rtnprd, file_num);
+      const result = await fetchAndDecryptGstr2b(
+        requestId,
+        cfg,
+        session,
+        rtnprd,
+        file_num
+      );
       return res.status(result.status).json(result.body);
     }
 
@@ -475,7 +506,8 @@ async function handleGetGstr2b(req, res) {
         return res.status(401).json({
           success: false,
           otpRequired: true,
-          message: "OTP sent to registered mobile/email. Submit OTP to /api/gstr2b/auth/verify-otp.",
+          message:
+            "OTP sent to registered mobile/email. Submit OTP to /api/gstr2b/auth/verify-otp.",
         });
       }
       return res.status(sessionCheck.status || 502).json(sessionCheck.error);
