@@ -102,23 +102,38 @@ async function triggerOtpRequest(requestId, cfg) {
     return { ok: false, status: 502, error: tokenRes.error };
   }
 
-  console.log(
-    `[${requestId}] Triggering GST OTP request for ${cfg.username}...`
-  );
-  const resp = await fetch(`${FYNAMICS_BASE}/gst/requestOTP`, {
-    method: "POST",
+  const url = `${FYNAMICS_BASE}/gst/requestOTP`;
+  const headers = {
+    accept: "application/json",
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${tokenRes.accessToken}`,
+    gstin: cfg.gstin,
+    "ip-usr": cfg.ipUsr,
+    "state-cd": cfg.stateCd,
+  };
+  const requestBody = {
+    action: "OTPREQUEST",
+    username: cfg.username,
+  };
+  const clientIdSource = process.env.GST_CLIENT_ID
+    ? "GST_CLIENT_ID"
+    : "EINVOICE_CLIENT_ID";
+
+  console.log(`[${requestId}] requestOTP outgoing:`, {
+    url,
+    clientIdSource,
+    clientId: cfg.clientId,
     headers: {
-      accept: "application/json",
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${tokenRes.accessToken}`,
-      gstin: cfg.gstin,
-      "ip-usr": cfg.ipUsr,
-      "state-cd": cfg.stateCd,
+      ...headers,
+      Authorization: `Bearer ${String(tokenRes.accessToken).slice(0, 12)}...`,
     },
-    body: JSON.stringify({
-      action: "OTPREQUEST",
-      username: cfg.username,
-    }),
+    body: requestBody,
+  });
+
+  const resp = await fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(requestBody),
   });
 
   if (resp.status === 401) {
