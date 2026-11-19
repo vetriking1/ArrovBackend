@@ -107,7 +107,6 @@ async function triggerOtpRequest(requestId, cfg) {
     accept: "application/json",
     "Content-Type": "application/json",
     Authorization: `Bearer ${tokenRes.accessToken}`,
-    gstin: cfg.gstin,
     "ip-usr": cfg.ipUsr,
     "state-cd": cfg.stateCd,
   };
@@ -176,7 +175,6 @@ async function refreshGstSession(requestId, cfg, session) {
       accept: "application/json",
       "Content-Type": "application/json",
       Authorization: `Bearer ${tokenRes.accessToken}`,
-      gstin: cfg.gstin,
       "ip-usr": cfg.ipUsr,
       "state-cd": cfg.stateCd,
       sek: session.sek,
@@ -415,7 +413,6 @@ router.post("/auth/verify-otp", async (req, res) => {
         accept: "application/json",
         "Content-Type": "application/json",
         Authorization: `Bearer ${tokenRes.accessToken}`,
-        gstin: cfg.gstin,
         "ip-usr": cfg.ipUsr,
         "state-cd": cfg.stateCd,
         app_key: appKey,
